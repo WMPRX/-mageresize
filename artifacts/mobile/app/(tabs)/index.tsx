@@ -813,7 +813,7 @@ const styles = StyleSheet.create({
   },
   addMoreTile: {
     width: GRID_ITEM_SIZE,
-    height: GRID_ITEM_SIZE,
+    height: GRID_ITEM_SIZE + 28,
     borderRadius: 16,
     borderWidth: 2,
     borderColor: Colors.light.coral + "55",

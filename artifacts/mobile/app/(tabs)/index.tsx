@@ -23,6 +23,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ClayCard } from "@/components/ClayCard";
+import { ComparisonModal } from "@/components/ComparisonModal";
 import Colors from "@/constants/colors";
 import { useCompression } from "@/context/CompressionContext";
 
@@ -218,6 +219,7 @@ export default function CompressScreen() {
   const [format, setFormat] = useState<OutputFormat>("jpeg");
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressingIdx, setCompressingIdx] = useState<number | null>(null);
+  const [selectedComparison, setSelectedComparison] = useState<number | null>(null);
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [allSaved, setAllSaved] = useState(false);
 
@@ -540,7 +542,13 @@ export default function CompressScreen() {
                 ? savingsPercent(item.photo.fileSize, item.compressed.fileSize)
                 : 0;
               return (
-                <View key={idx} style={styles.photoGridItem}>
+                <Pressable
+                  key={idx}
+                  style={styles.photoGridItem}
+                  onPress={() => {
+                    if (item.compressed) setSelectedComparison(idx);
+                  }}
+                >
                   <Image
                     source={{ uri: item.compressed?.uri ?? item.photo.uri }}
                     style={styles.gridImage}
@@ -585,7 +593,12 @@ export default function CompressScreen() {
                       </Text>
                     </View>
                   )}
-                </View>
+                  {item.compressed && (
+                    <View style={styles.compareTip} pointerEvents="none">
+                      <Ionicons name="eye-outline" size={10} color={Colors.light.coral} />
+                    </View>
+                  )}
+                </Pressable>
               );
             })}
 
@@ -853,6 +866,17 @@ export default function CompressScreen() {
           </View>
         )}
       </ScrollView>
+
+      {selectedComparison !== null && photos[selectedComparison]?.compressed && (
+        <ComparisonModal
+          visible
+          onClose={() => setSelectedComparison(null)}
+          originalUri={photos[selectedComparison].photo.uri}
+          compressedUri={photos[selectedComparison].compressed!.uri}
+          originalSize={photos[selectedComparison].photo.fileSize}
+          compressedSize={photos[selectedComparison].compressed!.fileSize}
+        />
+      )}
     </View>
   );
 }
@@ -958,6 +982,17 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: "hidden",
     backgroundColor: Colors.light.creamDark,
+  },
+  compareTip: {
+    position: "absolute",
+    bottom: 30,
+    right: 4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "rgba(255,255,255,0.85)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   addMoreTile: {
     width: GRID_ITEM_SIZE,

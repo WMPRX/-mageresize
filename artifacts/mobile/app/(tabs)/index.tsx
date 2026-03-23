@@ -212,6 +212,39 @@ export default function CompressScreen() {
     }
   };
 
+  const addMoreImages = async () => {
+    await Haptics.selectionAsync();
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      quality: 1,
+    });
+
+    if (!result.canceled && result.assets.length > 0) {
+      const newPhotos: PhotoResult[] = await Promise.all(
+        result.assets.map(async (asset) => {
+          let fileSize = asset.fileSize ?? 0;
+          if (!fileSize && asset.uri) {
+            fileSize = await getFileSize(asset.uri);
+          }
+          return {
+            photo: {
+              uri: asset.uri,
+              width: asset.width ?? 0,
+              height: asset.height ?? 0,
+              fileSize,
+              fileName: asset.fileName ?? `photo_${Date.now()}.jpg`,
+            },
+            compressed: null,
+            saved: false,
+          };
+        })
+      );
+      setPhotos((prev) => [...prev, ...newPhotos]);
+      setAllSaved(false);
+    }
+  };
+
   const compressAll = async () => {
     if (photos.length === 0) return;
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -426,6 +459,12 @@ export default function CompressScreen() {
                 </View>
               );
             })}
+
+            {/* Add more photos tile */}
+            <Pressable onPress={addMoreImages} style={styles.addMoreTile}>
+              <Ionicons name="add" size={32} color={Colors.light.coral} />
+              <Text style={styles.addMoreText}>Ekle</Text>
+            </Pressable>
           </View>
         )}
 
@@ -771,6 +810,23 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: "hidden",
     backgroundColor: Colors.light.creamDark,
+  },
+  addMoreTile: {
+    width: GRID_ITEM_SIZE,
+    height: GRID_ITEM_SIZE,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: Colors.light.coral + "55",
+    borderStyle: "dashed",
+    backgroundColor: Colors.light.coral + "08",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  addMoreText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.light.coral,
   },
   gridImage: {
     width: "100%",

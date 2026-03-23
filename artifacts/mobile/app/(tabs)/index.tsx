@@ -28,7 +28,7 @@ import { useCompression } from "@/context/CompressionContext";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
-type Level = "low" | "medium" | "high";
+type Level = "low" | "medium" | "high" | "smart";
 type OutputFormat = "jpeg" | "png" | "webp";
 
 type SelectedPhoto = {
@@ -43,6 +43,7 @@ type CompressResult = {
   uri: string;
   fileSize: number;
   format: OutputFormat;
+  winnerLabel?: string;
 };
 
 type PhotoResult = {
@@ -50,6 +51,8 @@ type PhotoResult = {
   compressed: CompressResult | null;
   saved: boolean;
 };
+
+const SMART_COLOR = "#7C4DFF";
 
 const LEVEL_CONFIG: Record<Level, { label: string; desc: string; color: string; bg: string }> = {
   low: {
@@ -70,6 +73,12 @@ const LEVEL_CONFIG: Record<Level, { label: string; desc: string; color: string; 
     color: Colors.light.mint,
     bg: Colors.light.mint + "28",
   },
+  smart: {
+    label: "Akıllı",
+    desc: "~%20-45 küçültme",
+    color: SMART_COLOR,
+    bg: SMART_COLOR + "18",
+  },
 };
 
 const FORMAT_CONFIG: Record<OutputFormat, { label: string; desc: string }> = {
@@ -78,7 +87,7 @@ const FORMAT_CONFIG: Record<OutputFormat, { label: string; desc: string }> = {
   webp: { label: "WEBP", desc: "Modern" },
 };
 
-function getCompressionSettings(level: Level, format: OutputFormat): {
+function getCompressionSettings(level: Exclude<Level, "smart">, format: OutputFormat): {
   saveFormat: ImageManipulator.SaveFormat;
   compress: number;
   actualFormat: OutputFormat;
@@ -100,6 +109,58 @@ function getCompressionSettings(level: Level, format: OutputFormat): {
   return { saveFormat: fmtMap[format], compress: 0.60, actualFormat: format };
 }
 
+async function smartCompress(
+  uri: string,
+  width: number,
+  originalSize: number
+): Promise<{ uri: string; fileSize: number; format: OutputFormat; winnerLabel: string }> {
+  const actions: ImageManipulator.Action[] =
+    width > 3000 ? [{ resize: { width: 2048 } }] : [];
+
+  const [jpegResult, webpResult] = await Promise.all([
+    ImageManipulator.manipulateAsync(uri, actions, {
+      compress: 0.88,
+      format: ImageManipulator.SaveFormat.JPEG,
+    }),
+    ImageManipulator.manipulateAsync(uri, actions, {
+      compress: 0.88,
+      format: ImageManipulator.SaveFormat.WEBP,
+    }),
+  ]);
+
+  const [jpegSize, webpSize] = await Promise.all([
+    getFileSize(jpegResult.uri),
+    getFileSize(webpResult.uri),
+  ]);
+
+  let winner: { uri: string; fileSize: number; format: OutputFormat };
+  if (jpegSize > 0 && webpSize > 0) {
+    winner = jpegSize < webpSize
+      ? { uri: jpegResult.uri, fileSize: jpegSize, format: "jpeg" }
+      : { uri: webpResult.uri, fileSize: webpSize, format: "webp" };
+  } else {
+    winner = { uri: webpResult.uri, fileSize: webpSize || jpegSize, format: "webp" };
+  }
+
+  if (originalSize > 0 && winner.fileSize >= originalSize) {
+    const fallback = await ImageManipulator.manipulateAsync(uri, actions, {
+      compress: 0.80,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+    const fallbackSize = await getFileSize(fallback.uri);
+    if (fallbackSize > 0 && fallbackSize < winner.fileSize) {
+      winner = { uri: fallback.uri, fileSize: fallbackSize, format: "jpeg" };
+    }
+  }
+
+  const savings = originalSize > 0
+    ? Math.max(0, Math.round(((originalSize - winner.fileSize) / originalSize) * 100))
+    : 0;
+  const winnerLabel = `${winner.format.toUpperCase()} · %${savings} küçültüldü`;
+
+  return { ...winner, winnerLabel };
+}
+
 const MIME_TYPES: Record<OutputFormat, string> = {
   jpeg: "image/jpeg",
   png: "image/png",
@@ -110,6 +171,7 @@ const ESTIMATE_FACTORS: Record<Level, number> = {
   low: 0.45,
   medium: 0.60,
   high: 0.75,
+  smart: 0.55,
 };
 
 function formatBytes(bytes: number): string {
@@ -163,7 +225,10 @@ export default function CompressScreen() {
       const safeFormat: OutputFormat =
         pendingFormat === "png" ? "png" : pendingFormat === "webp" ? "webp" : "jpeg";
       const safeLevel: Level =
-        pendingLevel === "low" ? "low" : pendingLevel === "high" ? "high" : "medium";
+        pendingLevel === "low" ? "low"
+        : pendingLevel === "high" ? "high"
+        : pendingLevel === "smart" ? "smart"
+        : "medium";
       setFormat(safeFormat);
       setLevel(safeLevel);
       setPhotos([{
@@ -278,35 +343,42 @@ export default function CompressScreen() {
     setIsCompressing(true);
     setAllSaved(false);
 
-    const { saveFormat, compress, actualFormat } = getCompressionSettings(level, format);
     const updated: PhotoResult[] = [...photos];
 
     for (let i = 0; i < photos.length; i++) {
       const p = photos[i];
       try {
-        const result = await ImageManipulator.manipulateAsync(
-          p.photo.uri,
-          [],
-          { compress, format: saveFormat }
-        );
+        let compressedResult: CompressResult;
+        let qualityUsed: number;
 
-        const compressedSize = await getFileSize(result.uri);
+        if (level === "smart") {
+          const smart = await smartCompress(p.photo.uri, p.photo.width, p.photo.fileSize);
+          compressedResult = { uri: smart.uri, fileSize: smart.fileSize, format: smart.format, winnerLabel: smart.winnerLabel };
+          qualityUsed = 0.88;
+        } else {
+          const { saveFormat, compress, actualFormat } = getCompressionSettings(level, format);
+          const result = await ImageManipulator.manipulateAsync(
+            p.photo.uri,
+            [],
+            { compress, format: saveFormat }
+          );
+          const compressedSize = await getFileSize(result.uri);
+          compressedResult = { uri: result.uri, fileSize: compressedSize, format: actualFormat };
+          qualityUsed = compress;
+        }
 
-        updated[i] = {
-          ...p,
-          compressed: { uri: result.uri, fileSize: compressedSize, format: actualFormat },
-        };
+        updated[i] = { ...p, compressed: compressedResult };
 
         await addToHistory({
           id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
           originalUri: p.photo.uri,
-          compressedUri: result.uri,
+          compressedUri: compressedResult.uri,
           originalSize: p.photo.fileSize,
-          compressedSize,
-          quality: compress,
+          compressedSize: compressedResult.fileSize,
+          quality: qualityUsed,
           savedAt: Date.now(),
           fileName: p.photo.fileName,
-          format: actualFormat,
+          format: compressedResult.format,
           level,
         });
       } catch (e) {
@@ -395,7 +467,9 @@ export default function CompressScreen() {
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomInset = Platform.OS === "web" ? 34 : 0;
 
-  const { actualFormat: willUseFormat } = getCompressionSettings(level, format);
+  const willUseFormat: OutputFormat = level === "smart"
+    ? "webp"
+    : getCompressionSettings(level, format).actualFormat;
 
   return (
     <View style={styles.container}>
@@ -470,6 +544,13 @@ export default function CompressScreen() {
                       <Text style={styles.gridSavingsText}>-{savings}%</Text>
                     </View>
                   )}
+                  {item.compressed?.winnerLabel && (
+                    <View style={[styles.gridSavingsBadge, { bottom: "auto", top: 6, left: 6, right: "auto", backgroundColor: SMART_COLOR }]}>
+                      <Text style={[styles.gridSavingsText, { fontSize: 9 }]}>
+                        {item.compressed.format.toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
                   <View style={styles.gridSizeRow}>
                     <Text style={styles.gridSizeText}>
                       {formatBytes(item.compressed?.fileSize ?? item.photo.fileSize)}
@@ -505,10 +586,10 @@ export default function CompressScreen() {
                 <Text style={styles.sectionTitle}>Sıkıştırma Seviyesi</Text>
               </View>
               <View style={styles.pillRow}>
-                {(["low", "medium", "high"] as Level[]).map((l) => {
+                {(["low", "medium", "high", "smart"] as Level[]).map((l) => {
                   const cfg = LEVEL_CONFIG[l];
                   const active = level === l;
-                  const locked = format === "png" && l !== "high";
+                  const locked = format === "png" && l !== "high" && l !== "smart";
                   return (
                     <Pressable
                       key={l}
@@ -521,6 +602,14 @@ export default function CompressScreen() {
                         locked && { opacity: 0.35 },
                       ]}
                     >
+                      {l === "smart" && (
+                        <Ionicons
+                          name="sparkles"
+                          size={10}
+                          color={active ? "#fff" : cfg.color}
+                          style={{ marginBottom: 2 }}
+                        />
+                      )}
                       <Text style={[
                         styles.levelPillLabel,
                         { color: active ? "#fff" : cfg.color },
@@ -543,14 +632,14 @@ export default function CompressScreen() {
                 <Ionicons name="document-outline" size={16} color={Colors.light.coral} />
                 <Text style={styles.sectionTitle}>Çıktı Formatı</Text>
               </View>
-              <View style={styles.formatRow}>
+              <View style={[styles.formatRow, level === "smart" && { opacity: 0.35 }]}>
                 {(["jpeg", "png", "webp"] as OutputFormat[]).map((f) => {
                   const cfg = FORMAT_CONFIG[f];
                   const active = format === f;
                   return (
                     <Pressable
                       key={f}
-                      onPress={() => handleFormatChange(f)}
+                      onPress={() => level !== "smart" && handleFormatChange(f)}
                       style={[
                         styles.formatPill,
                         active
@@ -574,6 +663,16 @@ export default function CompressScreen() {
                   );
                 })}
               </View>
+
+              {/* Note for smart mode */}
+              {level === "smart" && (
+                <View style={[styles.infoRow, { backgroundColor: SMART_COLOR + "14", borderRadius: 10, padding: 8 }]}>
+                  <Ionicons name="sparkles" size={14} color={SMART_COLOR} />
+                  <Text style={[styles.infoText, { color: SMART_COLOR }]}>
+                    Akıllı mod her fotoğraf için en küçük formatı seçer
+                  </Text>
+                </View>
+              )}
 
               {/* Note when medium overrides format */}
               {level === "medium" && format !== "webp" && (
@@ -623,10 +722,11 @@ export default function CompressScreen() {
 
               {/* Actual format info */}
               {!hasCompressed && (
-                <View style={styles.outputInfo}>
-                  <Text style={styles.outputInfoText}>
-                    Çıktı: {willUseFormat.toUpperCase()} ·{" "}
-                    {level === "high" ? "Yüksek kalite, ~%15-25 küçültme" : level === "medium" ? "WEBP ile akıllı sıkıştırma" : "Maksimum küçültme"}
+                <View style={[styles.outputInfo, level === "smart" && { backgroundColor: SMART_COLOR + "14" }]}>
+                  <Text style={[styles.outputInfoText, level === "smart" && { color: SMART_COLOR }]}>
+                    {level === "smart"
+                      ? "JPEG / WEBP · Her fotoğraf için en iyi seçilir"
+                      : `Çıktı: ${willUseFormat.toUpperCase()} · ${level === "high" ? "Yüksek kalite, ~%15-25 küçültme" : level === "medium" ? "WEBP ile akıllı sıkıştırma" : "Maksimum küçültme"}`}
                   </Text>
                 </View>
               )}

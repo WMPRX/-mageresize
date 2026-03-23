@@ -1,4 +1,4 @@
-import React, { useRef, useState, useMemo } from "react";
+import React, { useRef, useState, useMemo, useEffect } from "react";
 import {
   Dimensions,
   Image,
@@ -30,8 +30,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 const SCREEN_W = Dimensions.get("window").width;
 const HANDLE_SIZE = 44;
+const DOUBLE_TAP_MS = 300;
+const MIN_SCALE = 1;
+const MAX_SCALE = 5;
 
 export function ComparisonModal({
   visible,
@@ -44,35 +51,171 @@ export function ComparisonModal({
   const insets = useSafeAreaInsets();
 
   const containerWidthRef = useRef(SCREEN_W);
+  const containerHeightRef = useRef(400);
+
   const fractionRef = useRef(0.5);
   const startFractionRef = useRef(0.5);
   const didDragRef = useRef(false);
   const [fraction, setFractionState] = useState(0.5);
+
+  const scaleRef = useRef(1);
+  const translateXRef = useRef(0);
+  const translateYRef = useRef(0);
+  const startTxRef = useRef(0);
+  const startTyRef = useRef(0);
+  const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 });
+
+  const isPinchingRef = useRef(false);
+  const pinchInitializedRef = useRef(false);
+  const initialPinchDistRef = useRef(0);
+  const initialScaleRef = useRef(1);
+  const initialMidXRef = useRef(0);
+  const initialMidYRef = useRef(0);
+  const initialTxRef = useRef(0);
+  const initialTyRef = useRef(0);
+
+  const lastTapRef = useRef(0);
+
+  useEffect(() => {
+    if (!visible) {
+      scaleRef.current = 1;
+      translateXRef.current = 0;
+      translateYRef.current = 0;
+      fractionRef.current = 0.5;
+      lastTapRef.current = 0;
+      isPinchingRef.current = false;
+      pinchInitializedRef.current = false;
+      setTransform({ scale: 1, tx: 0, ty: 0 });
+      setFractionState(0.5);
+    }
+  }, [visible]);
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
+
         onPanResponderGrant: () => {
           startFractionRef.current = fractionRef.current;
+          startTxRef.current = translateXRef.current;
+          startTyRef.current = translateYRef.current;
           didDragRef.current = false;
+          isPinchingRef.current = false;
+          pinchInitializedRef.current = false;
         },
-        onPanResponderMove: (_, gs) => {
-          if (Math.abs(gs.dx) > 4) {
+
+        onPanResponderMove: (evt, gs) => {
+          const touches = evt.nativeEvent.touches;
+
+          if (touches.length >= 2) {
+            if (!pinchInitializedRef.current) {
+              const t0 = touches[0];
+              const t1 = touches[1];
+              const dist = Math.hypot(
+                t1.pageX - t0.pageX,
+                t1.pageY - t0.pageY
+              );
+              initialPinchDistRef.current = dist < 1 ? 1 : dist;
+              initialScaleRef.current = scaleRef.current;
+              initialMidXRef.current = (t0.pageX + t1.pageX) / 2;
+              initialMidYRef.current = (t0.pageY + t1.pageY) / 2;
+              initialTxRef.current = translateXRef.current;
+              initialTyRef.current = translateYRef.current;
+              pinchInitializedRef.current = true;
+              isPinchingRef.current = true;
+            }
+
+            const t0 = touches[0];
+            const t1 = touches[1];
+            const dist = Math.hypot(
+              t1.pageX - t0.pageX,
+              t1.pageY - t0.pageY
+            );
+            const newScale = clamp(
+              initialScaleRef.current * (dist / initialPinchDistRef.current),
+              MIN_SCALE,
+              MAX_SCALE
+            );
+
+            const midX = (t0.pageX + t1.pageX) / 2;
+            const midY = (t0.pageY + t1.pageY) / 2;
+
+            const maxTx = (containerWidthRef.current * (newScale - 1)) / 2;
+            const maxTy = (containerHeightRef.current * (newScale - 1)) / 2;
+
+            const newTx = clamp(
+              initialTxRef.current + (midX - initialMidXRef.current),
+              -maxTx,
+              maxTx
+            );
+            const newTy = clamp(
+              initialTyRef.current + (midY - initialMidYRef.current),
+              -maxTy,
+              maxTy
+            );
+
+            scaleRef.current = newScale;
+            translateXRef.current = newTx;
+            translateYRef.current = newTy;
+            setTransform({ scale: newScale, tx: newTx, ty: newTy });
             didDragRef.current = true;
+          } else {
+            if (isPinchingRef.current) return;
+
+            if (Math.abs(gs.dx) > 4 || Math.abs(gs.dy) > 4) {
+              didDragRef.current = true;
+            }
+
+            if (scaleRef.current > 1.01) {
+              const maxTx =
+                (containerWidthRef.current * (scaleRef.current - 1)) / 2;
+              const maxTy =
+                (containerHeightRef.current * (scaleRef.current - 1)) / 2;
+              const newTx = clamp(
+                startTxRef.current + gs.dx,
+                -maxTx,
+                maxTx
+              );
+              const newTy = clamp(
+                startTyRef.current + gs.dy,
+                -maxTy,
+                maxTy
+              );
+              translateXRef.current = newTx;
+              translateYRef.current = newTy;
+              setTransform({ scale: scaleRef.current, tx: newTx, ty: newTy });
+            } else {
+              const w = containerWidthRef.current;
+              const next = clamp(
+                startFractionRef.current + gs.dx / w,
+                0.02,
+                0.98
+              );
+              fractionRef.current = next;
+              setFractionState(next);
+            }
           }
-          const w = containerWidthRef.current;
-          const next = Math.max(
-            0.02,
-            Math.min(0.98, startFractionRef.current + gs.dx / w)
-          );
-          fractionRef.current = next;
-          setFractionState(next);
         },
+
         onPanResponderRelease: () => {
+          isPinchingRef.current = false;
+          pinchInitializedRef.current = false;
+
           if (!didDragRef.current) {
-            onClose();
+            const now = Date.now();
+            if (now - lastTapRef.current < DOUBLE_TAP_MS) {
+              scaleRef.current = 1;
+              translateXRef.current = 0;
+              translateYRef.current = 0;
+              setTransform({ scale: 1, tx: 0, ty: 0 });
+              lastTapRef.current = 0;
+            } else {
+              lastTapRef.current = now;
+              if (scaleRef.current <= 1.01) {
+                onClose();
+              }
+            }
           }
         },
       }),
@@ -83,6 +226,7 @@ export function ComparisonModal({
     nativeEvent: { layout: { width: number; height: number } };
   }) => {
     containerWidthRef.current = e.nativeEvent.layout.width;
+    containerHeightRef.current = e.nativeEvent.layout.height;
   };
 
   const savings =
@@ -94,6 +238,7 @@ export function ComparisonModal({
       : 0;
 
   const sliderPx = fraction * containerWidthRef.current;
+  const isZoomed = transform.scale > 1.01;
 
   return (
     <Modal
@@ -132,38 +277,51 @@ export function ComparisonModal({
           onLayout={handleLayout}
           {...panResponder.panHandlers}
         >
-          <Image
-            source={{ uri: compressedUri }}
-            style={StyleSheet.absoluteFillObject}
-            resizeMode="contain"
-          />
-
           <View
-            style={[styles.clipView, { width: sliderPx }]}
-            pointerEvents="none"
+            style={[
+              styles.transformedContent,
+              {
+                transform: [
+                  { scale: transform.scale },
+                  { translateX: transform.tx },
+                  { translateY: transform.ty },
+                ],
+              },
+            ]}
           >
             <Image
-              source={{ uri: originalUri }}
-              style={[
-                StyleSheet.absoluteFillObject,
-                { width: containerWidthRef.current },
-              ]}
+              source={{ uri: compressedUri }}
+              style={StyleSheet.absoluteFillObject}
               resizeMode="contain"
             />
-          </View>
 
-          <View
-            style={[styles.dividerLine, { left: sliderPx - 1 }]}
-            pointerEvents="none"
-          />
+            <View
+              style={[styles.clipView, { width: sliderPx }]}
+              pointerEvents="none"
+            >
+              <Image
+                source={{ uri: originalUri }}
+                style={[
+                  StyleSheet.absoluteFillObject,
+                  { width: containerWidthRef.current },
+                ]}
+                resizeMode="contain"
+              />
+            </View>
 
-          <View
-            style={[styles.handleWrapper, { left: sliderPx - HANDLE_SIZE / 2 }]}
-            pointerEvents="none"
-          >
-            <View style={styles.handle}>
-              <Ionicons name="chevron-back" size={14} color={Colors.light.coral} />
-              <Ionicons name="chevron-forward" size={14} color={Colors.light.coral} />
+            <View
+              style={[styles.dividerLine, { left: sliderPx - 1 }]}
+              pointerEvents="none"
+            />
+
+            <View
+              style={[styles.handleWrapper, { left: sliderPx - HANDLE_SIZE / 2 }]}
+              pointerEvents="none"
+            >
+              <View style={styles.handle}>
+                <Ionicons name="chevron-back" size={14} color={Colors.light.coral} />
+                <Ionicons name="chevron-forward" size={14} color={Colors.light.coral} />
+              </View>
             </View>
           </View>
 
@@ -175,14 +333,27 @@ export function ComparisonModal({
             <Text style={styles.labelText}>Sonra</Text>
           </View>
 
+          {isZoomed && (
+            <View style={styles.scaleBadge} pointerEvents="none">
+              <Ionicons name="search" size={10} color={Colors.light.textPrimary} />
+              <Text style={styles.scaleBadgeText}>
+                {transform.scale.toFixed(1)}×
+              </Text>
+            </View>
+          )}
+
           <View style={styles.hintContainer} pointerEvents="none">
-            <Text style={styles.hintText}>← Sürükle →</Text>
+            <Text style={styles.hintText}>
+              {isZoomed ? "Kaydır · Çift dokun: sıfırla" : "← Sürükle → · İki parmak: yakınlaştır"}
+            </Text>
           </View>
         </View>
 
         <View style={styles.footer}>
           <View style={styles.footerPill} />
-          <Text style={styles.footerHint}>Kapatmak için dokun</Text>
+          <Text style={styles.footerHint}>
+            {isZoomed ? "Çift dokun: sıfırla · Dışarı dokun: kapat" : "Kapatmak için dokun"}
+          </Text>
         </View>
       </Pressable>
     </Modal>
@@ -261,6 +432,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1.5,
     borderColor: Colors.light.coral + "40",
   },
+  transformedContent: {
+    ...StyleSheet.absoluteFillObject,
+  },
   clipView: {
     position: "absolute",
     top: 0,
@@ -325,6 +499,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_700Bold",
     letterSpacing: 0.3,
+  },
+  scaleBadge: {
+    position: "absolute",
+    bottom: 44,
+    right: 12,
+    backgroundColor: Colors.light.lavender + "E8",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.55)",
+    shadowColor: Colors.light.lavender,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  scaleBadgeText: {
+    color: Colors.light.textPrimary,
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.4,
   },
   hintContainer: {
     position: "absolute",

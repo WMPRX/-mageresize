@@ -113,7 +113,7 @@ async function smartCompress(
   uri: string,
   width: number,
   originalSize: number
-): Promise<{ uri: string; fileSize: number; format: OutputFormat; winnerLabel: string }> {
+): Promise<{ uri: string; fileSize: number; format: OutputFormat; winnerLabel: string; qualityUsed: number }> {
   const actions: ImageManipulator.Action[] =
     width > 3000 ? [{ resize: { width: 2048 } }] : [];
 
@@ -138,10 +138,13 @@ async function smartCompress(
     winner = jpegSize < webpSize
       ? { uri: jpegResult.uri, fileSize: jpegSize, format: "jpeg" }
       : { uri: webpResult.uri, fileSize: webpSize, format: "webp" };
+  } else if (jpegSize > 0) {
+    winner = { uri: jpegResult.uri, fileSize: jpegSize, format: "jpeg" };
   } else {
-    winner = { uri: webpResult.uri, fileSize: webpSize || jpegSize, format: "webp" };
+    winner = { uri: webpResult.uri, fileSize: webpSize, format: "webp" };
   }
 
+  let qualityUsed = 0.88;
   if (originalSize > 0 && winner.fileSize >= originalSize) {
     const fallback = await ImageManipulator.manipulateAsync(uri, actions, {
       compress: 0.80,
@@ -150,15 +153,16 @@ async function smartCompress(
     const fallbackSize = await getFileSize(fallback.uri);
     if (fallbackSize > 0 && fallbackSize < winner.fileSize) {
       winner = { uri: fallback.uri, fileSize: fallbackSize, format: "jpeg" };
+      qualityUsed = 0.80;
     }
   }
 
   const savings = originalSize > 0
     ? Math.max(0, Math.round(((originalSize - winner.fileSize) / originalSize) * 100))
     : 0;
-  const winnerLabel = `${winner.format.toUpperCase()} · %${savings} küçültüldü`;
+  const winnerLabel = `Kazanan: ${winner.format.toUpperCase()} · %${savings} küçültüldü`;
 
-  return { ...winner, winnerLabel };
+  return { ...winner, winnerLabel, qualityUsed };
 }
 
 const MIME_TYPES: Record<OutputFormat, string> = {
@@ -356,7 +360,7 @@ export default function CompressScreen() {
         if (level === "smart") {
           const smart = await smartCompress(p.photo.uri, p.photo.width, p.photo.fileSize);
           compressedResult = { uri: smart.uri, fileSize: smart.fileSize, format: smart.format, winnerLabel: smart.winnerLabel };
-          qualityUsed = 0.88;
+          qualityUsed = smart.qualityUsed;
         } else {
           const { saveFormat, compress, actualFormat } = getCompressionSettings(level, format);
           const result = await ImageManipulator.manipulateAsync(

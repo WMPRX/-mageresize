@@ -266,9 +266,11 @@ export default function CompressScreen() {
       if (Platform.OS === "web") {
         for (const p of photos) {
           if (p.compressed) {
+            const ext = p.compressed.format === "png" ? "png" : p.compressed.format === "webp" ? "webp" : "jpg";
+            const baseName = p.photo.fileName.replace(/\.[^.]+$/, "");
             const a = document.createElement("a");
             a.href = p.compressed.uri;
-            a.download = `compressed_${p.photo.fileName}`;
+            a.download = `compressed_${baseName}.${ext}`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -430,15 +432,17 @@ export default function CompressScreen() {
                 {(["low", "medium", "high"] as Level[]).map((l) => {
                   const cfg = LEVEL_CONFIG[l];
                   const active = level === l;
+                  const locked = format === "png" && l !== "high";
                   return (
                     <Pressable
                       key={l}
-                      onPress={() => handleLevelChange(l)}
+                      onPress={() => !locked && handleLevelChange(l)}
                       style={[
                         styles.levelPill,
                         active
                           ? { backgroundColor: cfg.color, borderColor: cfg.color }
                           : { backgroundColor: cfg.bg, borderColor: cfg.color + "40" },
+                        locked && { opacity: 0.35 },
                       ]}
                     >
                       <Text style={[
@@ -451,7 +455,7 @@ export default function CompressScreen() {
                         styles.levelPillDesc,
                         { color: active ? "rgba(255,255,255,0.85)" : cfg.color + "BB" },
                       ]}>
-                        {cfg.desc}
+                        {locked ? "PNG ile kilitledi" : cfg.desc}
                       </Text>
                     </Pressable>
                   );

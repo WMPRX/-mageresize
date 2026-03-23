@@ -1,5 +1,6 @@
 import React, { useRef, useState, useMemo, useEffect } from "react";
 import {
+  Animated,
   Dimensions,
   Image,
   Modal,
@@ -37,6 +38,7 @@ function clamp(value: number, min: number, max: number): number {
 const SCREEN_W = Dimensions.get("window").width;
 const HANDLE_SIZE = 44;
 const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_SLOP = 50;
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 
@@ -63,7 +65,13 @@ export function ComparisonModal({
   const translateYRef = useRef(0);
   const startTxRef = useRef(0);
   const startTyRef = useRef(0);
-  const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 });
+  const [isZoomed, setIsZoomed] = useState(false);
+
+  const animScale = useRef(new Animated.Value(1)).current;
+  const animTx = useRef(new Animated.Value(0)).current;
+  const animTy = useRef(new Animated.Value(0)).current;
+
+  const isZoomedRef = useRef(false);
 
   const isPinchingRef = useRef(false);
   const pinchInitializedRef = useRef(false);
@@ -74,21 +82,58 @@ export function ComparisonModal({
   const initialTxRef = useRef(0);
   const initialTyRef = useRef(0);
 
-  const lastTapRef = useRef(0);
+  const lastTapTimeRef = useRef(0);
+  const lastTapXRef = useRef(0);
+  const lastTapYRef = useRef(0);
 
   useEffect(() => {
     if (!visible) {
+      animScale.stopAnimation();
+      animTx.stopAnimation();
+      animTy.stopAnimation();
+      animScale.setValue(1);
+      animTx.setValue(0);
+      animTy.setValue(0);
       scaleRef.current = 1;
       translateXRef.current = 0;
       translateYRef.current = 0;
       fractionRef.current = 0.5;
-      lastTapRef.current = 0;
+      lastTapTimeRef.current = 0;
       isPinchingRef.current = false;
       pinchInitializedRef.current = false;
-      setTransform({ scale: 1, tx: 0, ty: 0 });
+      isZoomedRef.current = false;
+      setIsZoomed(false);
       setFractionState(0.5);
     }
-  }, [visible]);
+  }, [visible, animScale, animTx, animTy]);
+
+  const resetZoomAnimated = () => {
+    scaleRef.current = 1;
+    translateXRef.current = 0;
+    translateYRef.current = 0;
+    isZoomedRef.current = false;
+    setIsZoomed(false);
+    Animated.parallel([
+      Animated.spring(animScale, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 120,
+        friction: 8,
+      }),
+      Animated.spring(animTx, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 120,
+        friction: 8,
+      }),
+      Animated.spring(animTy, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 120,
+        friction: 8,
+      }),
+    ]).start();
+  };
 
   const panResponder = useMemo(
     () =>
@@ -158,7 +203,13 @@ export function ComparisonModal({
             scaleRef.current = newScale;
             translateXRef.current = newTx;
             translateYRef.current = newTy;
-            setTransform({ scale: newScale, tx: newTx, ty: newTy });
+            animScale.setValue(newScale);
+            animTx.setValue(newTx);
+            animTy.setValue(newTy);
+            if (newScale > 1.01 && !isZoomedRef.current) {
+              isZoomedRef.current = true;
+              setIsZoomed(true);
+            }
             didDragRef.current = true;
           } else {
             if (isPinchingRef.current) return;
@@ -184,7 +235,8 @@ export function ComparisonModal({
               );
               translateXRef.current = newTx;
               translateYRef.current = newTy;
-              setTransform({ scale: scaleRef.current, tx: newTx, ty: newTy });
+              animTx.setValue(newTx);
+              animTy.setValue(newTy);
             } else {
               const w = containerWidthRef.current;
               const next = clamp(
@@ -198,20 +250,27 @@ export function ComparisonModal({
           }
         },
 
-        onPanResponderRelease: () => {
+        onPanResponderRelease: (_, gs) => {
           isPinchingRef.current = false;
           pinchInitializedRef.current = false;
 
           if (!didDragRef.current) {
             const now = Date.now();
-            if (now - lastTapRef.current < DOUBLE_TAP_MS) {
-              scaleRef.current = 1;
-              translateXRef.current = 0;
-              translateYRef.current = 0;
-              setTransform({ scale: 1, tx: 0, ty: 0 });
-              lastTapRef.current = 0;
+            const timeDiff = now - lastTapTimeRef.current;
+            const dx = Math.abs(gs.x0 - lastTapXRef.current);
+            const dy = Math.abs(gs.y0 - lastTapYRef.current);
+
+            if (
+              timeDiff < DOUBLE_TAP_MS &&
+              dx < DOUBLE_TAP_SLOP &&
+              dy < DOUBLE_TAP_SLOP
+            ) {
+              resetZoomAnimated();
+              lastTapTimeRef.current = 0;
             } else {
-              lastTapRef.current = now;
+              lastTapTimeRef.current = now;
+              lastTapXRef.current = gs.x0;
+              lastTapYRef.current = gs.y0;
               if (scaleRef.current <= 1.01) {
                 onClose();
               }
@@ -219,6 +278,7 @@ export function ComparisonModal({
           }
         },
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [onClose]
   );
 
@@ -238,7 +298,6 @@ export function ComparisonModal({
       : 0;
 
   const sliderPx = fraction * containerWidthRef.current;
-  const isZoomed = transform.scale > 1.01;
 
   return (
     <Modal
@@ -277,14 +336,14 @@ export function ComparisonModal({
           onLayout={handleLayout}
           {...panResponder.panHandlers}
         >
-          <View
+          <Animated.View
             style={[
               styles.transformedContent,
               {
                 transform: [
-                  { scale: transform.scale },
-                  { translateX: transform.tx },
-                  { translateY: transform.ty },
+                  { scale: animScale },
+                  { translateX: animTx },
+                  { translateY: animTy },
                 ],
               },
             ]}
@@ -323,7 +382,7 @@ export function ComparisonModal({
                 <Ionicons name="chevron-forward" size={14} color={Colors.light.coral} />
               </View>
             </View>
-          </View>
+          </Animated.View>
 
           <View style={[styles.labelContainer, styles.labelLeft]} pointerEvents="none">
             <Text style={styles.labelText}>Önce</Text>
@@ -337,14 +396,16 @@ export function ComparisonModal({
             <View style={styles.scaleBadge} pointerEvents="none">
               <Ionicons name="search" size={10} color={Colors.light.textPrimary} />
               <Text style={styles.scaleBadgeText}>
-                {transform.scale.toFixed(1)}×
+                {scaleRef.current.toFixed(1)}×
               </Text>
             </View>
           )}
 
           <View style={styles.hintContainer} pointerEvents="none">
             <Text style={styles.hintText}>
-              {isZoomed ? "Kaydır · Çift dokun: sıfırla" : "← Sürükle → · İki parmak: yakınlaştır"}
+              {isZoomed
+                ? "Kaydır · Çift dokun: sıfırla"
+                : "← Sürükle → · İki parmak: yakınlaştır"}
             </Text>
           </View>
         </View>
@@ -352,7 +413,9 @@ export function ComparisonModal({
         <View style={styles.footer}>
           <View style={styles.footerPill} />
           <Text style={styles.footerHint}>
-            {isZoomed ? "Çift dokun: sıfırla · Dışarı dokun: kapat" : "Kapatmak için dokun"}
+            {isZoomed
+              ? "Çift dokun: sıfırla · Dışarı dokun: kapat"
+              : "Kapatmak için dokun"}
           </Text>
         </View>
       </Pressable>

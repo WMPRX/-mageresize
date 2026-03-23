@@ -66,7 +66,7 @@ const LEVEL_CONFIG: Record<Level, { label: string; desc: string; color: string; 
   },
   high: {
     label: "Yüksek",
-    desc: "Kayıpsız kalite",
+    desc: "Kayıpsız ~%10-30",
     color: Colors.light.mint,
     bg: Colors.light.mint + "28",
   },
@@ -467,7 +467,6 @@ export default function CompressScreen() {
                 {(["jpeg", "png", "webp"] as OutputFormat[]).map((f) => {
                   const cfg = FORMAT_CONFIG[f];
                   const active = format === f;
-                  const isPngLocked = f === "png" && format !== "png" && false;
                   return (
                     <Pressable
                       key={f}
@@ -477,7 +476,6 @@ export default function CompressScreen() {
                         active
                           ? { backgroundColor: Colors.light.coral, borderColor: Colors.light.coral }
                           : { backgroundColor: Colors.light.creamDark, borderColor: "transparent" },
-                        isPngLocked && { opacity: 0.5 },
                       ]}
                     >
                       <Text style={[

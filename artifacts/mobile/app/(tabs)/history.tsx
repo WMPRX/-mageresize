@@ -313,6 +313,9 @@ export default function HistoryScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (_) {
       setStatus("error");
+      if (Platform.OS !== "web") {
+        Alert.alert("İndirilemedi", "Sıkıştırılmış dosyaya artık erişilemiyor.", [{ text: "Tamam" }]);
+      }
     }
   };
 
@@ -334,9 +337,13 @@ export default function HistoryScreen() {
         fileName: item.fileName,
         originalSize: item.originalSize,
       });
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.navigate("/");
     } catch (_) {
       setStatus("error");
+      if (Platform.OS !== "web") {
+        Alert.alert("Dosya Bulunamadı", "Orijinal fotoğraf artık erişilemiyor. Lütfen fotoğrafı tekrar seçin.", [{ text: "Tamam" }]);
+      }
     }
   };
 

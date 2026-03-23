@@ -1,0 +1,37 @@
+const clay = {
+  coral: "#FF6B6B",
+  coralLight: "#FF8E8E",
+  coralDark: "#E85555",
+  lavender: "#C9A8FF",
+  lavenderLight: "#DEC8FF",
+  mint: "#7EEAC5",
+  mintLight: "#A8F2D8",
+  peach: "#FFB347",
+  peachLight: "#FFC870",
+  sky: "#74C0FC",
+  cream: "#FFF4F0",
+  creamDark: "#FFEAE0",
+  white: "#FFFFFF",
+  cardBg: "#FFFFFF",
+  textPrimary: "#2D2D2D",
+  textSecondary: "#7A7A8C",
+  textMuted: "#B0B0C0",
+  shadow: "rgba(255, 107, 107, 0.25)",
+  shadowDark: "rgba(0, 0, 0, 0.12)",
+};
+
+export default {
+  light: {
+    text: clay.textPrimary,
+    textSecondary: clay.textSecondary,
+    textMuted: clay.textMuted,
+    background: clay.cream,
+    backgroundSecondary: clay.creamDark,
+    tint: clay.coral,
+    tabIconDefault: clay.textMuted,
+    tabIconSelected: clay.coral,
+    card: clay.cardBg,
+    border: "rgba(201, 168, 255, 0.3)",
+    ...clay,
+  },
+};

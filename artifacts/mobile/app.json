@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "Fotoğraf Sıkıştırıcı",
+    "slug": "mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "mobile",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFF4F0"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Fotoğraflarınızı sıkıştırmak için galeriye erişim gerekiyor.",
+        "NSPhotoLibraryAddUsageDescription": "Sıkıştırılmış fotoğrafları galerinize kaydetmek için erişim gerekiyor."
+      }
+    },
+    "android": {
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://replit.com/"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Sıkıştırılmış fotoğrafları galerinize kaydetmek için erişim gerekiyor.",
+          "savePhotosPermission": "Fotoğrafları kaydetmek için erişim gerekiyor.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Fotoğraflarınızı sıkıştırmak için galeriye erişim gerekiyor."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

@@ -49,11 +49,6 @@ export function ComparisonModal({
   const didDragRef = useRef(false);
   const [fraction, setFractionState] = useState(0.5);
 
-  const setFraction = (v: number) => {
-    fractionRef.current = v;
-    setFractionState(v);
-  };
-
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -108,19 +103,21 @@ export function ComparisonModal({
       onRequestClose={onClose}
       statusBarTranslucent={Platform.OS !== "web"}
     >
-      <View
+      {/* Outer Pressable dismisses modal on tap anywhere on the backdrop */}
+      <Pressable
         style={[
           styles.overlay,
           { paddingTop: insets.top, paddingBottom: insets.bottom },
         ]}
+        onPress={onClose}
       >
-        {/* Clay-styled header card */}
+        {/* Header card — inner View so tap here bubbles up to outer Pressable */}
         <View style={styles.headerCard}>
           <View style={styles.sizeInfo}>
             <Ionicons name="images-outline" size={14} color={Colors.light.textPrimary} />
             <Text style={styles.sizeOriginal}>{formatBytes(originalSize)}</Text>
             <Ionicons name="arrow-forward" size={12} color={Colors.light.coral} />
-            <Text style={[styles.sizeCompressed]}>{formatBytes(compressedSize)}</Text>
+            <Text style={styles.sizeCompressed}>{formatBytes(compressedSize)}</Text>
             {savings > 0 && (
               <View style={styles.savingsBadge}>
                 <Text style={styles.savingsText}>-%{savings}</Text>
@@ -132,20 +129,18 @@ export function ComparisonModal({
           </Pressable>
         </View>
 
-        {/* Image comparison area */}
+        {/* Image comparison — PanResponder claims all touches; tap (no drag) also closes */}
         <View
           style={styles.imageContainer}
           onLayout={handleLayout}
           {...panResponder.panHandlers}
         >
-          {/* Bottom layer: compressed (full width) */}
           <Image
             source={{ uri: compressedUri }}
             style={StyleSheet.absoluteFillObject}
             resizeMode="contain"
           />
 
-          {/* Top layer: original (clipped to slider position) */}
           <View
             style={[styles.clipView, { width: sliderPx }]}
             pointerEvents="none"
@@ -160,13 +155,11 @@ export function ComparisonModal({
             />
           </View>
 
-          {/* Coral divider line */}
           <View
             style={[styles.dividerLine, { left: sliderPx - 1 }]}
             pointerEvents="none"
           />
 
-          {/* Handle — centered via wrapper trick, no type casts */}
           <View
             style={[styles.handleWrapper, { left: sliderPx - HANDLE_SIZE / 2 }]}
             pointerEvents="none"
@@ -177,34 +170,25 @@ export function ComparisonModal({
             </View>
           </View>
 
-          {/* Before label */}
-          <View
-            style={[styles.labelContainer, styles.labelLeft]}
-            pointerEvents="none"
-          >
+          <View style={[styles.labelContainer, styles.labelLeft]} pointerEvents="none">
             <Text style={styles.labelText}>Önce</Text>
           </View>
 
-          {/* After label */}
-          <View
-            style={[styles.labelContainer, styles.labelRight]}
-            pointerEvents="none"
-          >
+          <View style={[styles.labelContainer, styles.labelRight]} pointerEvents="none">
             <Text style={styles.labelText}>Sonra</Text>
           </View>
 
-          {/* Hint overlay (shown briefly at start) */}
           <View style={styles.hintContainer} pointerEvents="none">
             <Text style={styles.hintText}>← Sürükle →</Text>
           </View>
         </View>
 
-        {/* Clay footer */}
-        <Pressable style={styles.footer} onPress={onClose}>
+        {/* Footer — tap on footer also triggers outer Pressable (onClose) */}
+        <View style={styles.footer}>
           <View style={styles.footerPill} />
           <Text style={styles.footerHint}>Kapatmak için dokun</Text>
-        </Pressable>
-      </View>
+        </View>
+      </Pressable>
     </Modal>
   );
 }
@@ -277,7 +261,6 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: "hidden",
     backgroundColor: "#0D0D14",
-    marginHorizontal: 0,
     borderTopWidth: 1.5,
     borderBottomWidth: 1.5,
     borderColor: Colors.light.coral + "40",

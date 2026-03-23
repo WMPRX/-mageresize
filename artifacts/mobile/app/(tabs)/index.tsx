@@ -542,36 +542,43 @@ export default function CompressScreen() {
                 ? savingsPercent(item.photo.fileSize, item.compressed.fileSize)
                 : 0;
               return (
-                <Pressable
-                  key={idx}
-                  style={styles.photoGridItem}
-                  onPress={() => {
-                    if (item.compressed) setSelectedComparison(idx);
-                  }}
-                >
-                  <Image
-                    source={{ uri: item.compressed?.uri ?? item.photo.uri }}
-                    style={styles.gridImage}
-                    resizeMode="cover"
-                  />
-                  {item.compressed && (
-                    <View style={styles.gridSavingsBadge}>
-                      <Text style={styles.gridSavingsText}>-{savings}%</Text>
-                    </View>
-                  )}
-                  {isCompressing && compressingIdx === idx && !item.compressed && (
-                    <View style={styles.analyzingOverlay}>
-                      <Ionicons name="sparkles" size={14} color="#fff" />
-                      <Text style={styles.analyzingText}>Analiz ediliyor…</Text>
-                    </View>
-                  )}
-                  {item.compressed?.winnerLabel && (
-                    <View style={[styles.gridSavingsBadge, { bottom: "auto", top: 6, left: 6, right: "auto", backgroundColor: SMART_COLOR }]}>
-                      <Text style={[styles.gridSavingsText, { fontSize: 9 }]}>
-                        {item.compressed.format.toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
+                <View key={idx} style={styles.photoGridItem}>
+                  {/* Image area — tap opens comparison for compressed photos */}
+                  <Pressable
+                    style={styles.gridImageArea}
+                    onPress={() => item.compressed && setSelectedComparison(idx)}
+                  >
+                    <Image
+                      source={{ uri: item.compressed?.uri ?? item.photo.uri }}
+                      style={styles.gridImage}
+                      resizeMode="cover"
+                    />
+                    {item.compressed && (
+                      <View style={styles.gridSavingsBadge}>
+                        <Text style={styles.gridSavingsText}>-{savings}%</Text>
+                      </View>
+                    )}
+                    {isCompressing && compressingIdx === idx && !item.compressed && (
+                      <View style={styles.analyzingOverlay}>
+                        <Ionicons name="sparkles" size={14} color="#fff" />
+                        <Text style={styles.analyzingText}>Analiz ediliyor…</Text>
+                      </View>
+                    )}
+                    {item.compressed?.winnerLabel && (
+                      <View style={[styles.gridSavingsBadge, { bottom: "auto", top: 6, left: 6, right: "auto", backgroundColor: SMART_COLOR }]}>
+                        <Text style={[styles.gridSavingsText, { fontSize: 9 }]}>
+                          {item.compressed.format.toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    {item.compressed && (
+                      <View style={styles.compareTip} pointerEvents="none">
+                        <Ionicons name="eye-outline" size={10} color={Colors.light.coral} />
+                      </View>
+                    )}
+                  </Pressable>
+
+                  {/* Size row with share — outside image Pressable to avoid nesting */}
                   <View style={styles.gridSizeRow}>
                     <Text style={styles.gridSizeText}>
                       {formatBytes(item.compressed?.fileSize ?? item.photo.fileSize)}
@@ -593,12 +600,7 @@ export default function CompressScreen() {
                       </Text>
                     </View>
                   )}
-                  {item.compressed && (
-                    <View style={styles.compareTip} pointerEvents="none">
-                      <Ionicons name="eye-outline" size={10} color={Colors.light.coral} />
-                    </View>
-                  )}
-                </Pressable>
+                </View>
               );
             })}
 
@@ -982,6 +984,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: "hidden",
     backgroundColor: Colors.light.creamDark,
+  },
+  gridImageArea: {
+    width: GRID_ITEM_SIZE,
+    height: GRID_ITEM_SIZE,
+    position: "relative",
   },
   compareTip: {
     position: "absolute",

@@ -20,11 +20,21 @@ export type CompressedPhoto = {
   level?: string;
 };
 
+export type PendingRecompress = {
+  originalUri: string;
+  format: string;
+  level: string;
+  fileName: string;
+  originalSize: number;
+};
+
 type CompressionContextType = {
   history: CompressedPhoto[];
   addToHistory: (photo: CompressedPhoto) => Promise<void>;
   removeFromHistory: (id: string) => Promise<void>;
   clearHistory: () => Promise<void>;
+  pendingRecompress: PendingRecompress | null;
+  setPendingRecompress: (p: PendingRecompress | null) => void;
 };
 
 const CompressionContext = createContext<CompressionContextType | null>(null);
@@ -33,6 +43,7 @@ const STORAGE_KEY = "@photo_compression_history";
 
 export function CompressionProvider({ children }: { children: React.ReactNode }) {
   const [history, setHistory] = useState<CompressedPhoto[]>([]);
+  const [pendingRecompress, setPendingRecompress] = useState<PendingRecompress | null>(null);
 
   useEffect(() => {
     loadHistory();
@@ -80,7 +91,14 @@ export function CompressionProvider({ children }: { children: React.ReactNode })
 
   return (
     <CompressionContext.Provider
-      value={{ history, addToHistory, removeFromHistory, clearHistory }}
+      value={{
+        history,
+        addToHistory,
+        removeFromHistory,
+        clearHistory,
+        pendingRecompress,
+        setPendingRecompress,
+      }}
     >
       {children}
     </CompressionContext.Provider>

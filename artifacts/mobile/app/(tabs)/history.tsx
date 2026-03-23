@@ -1,6 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
+import * as MediaLibrary from "expo-media-library";
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   Alert,
@@ -91,14 +94,20 @@ function ConfirmModal({ visible, title, message, confirmLabel, onConfirm, onCanc
   );
 }
 
+type ActionStatus = "idle" | "loading" | "success" | "error";
+
 type HistoryItemProps = {
   item: CompressedPhoto;
   onDelete: (id: string) => void;
+  onDownload: (item: CompressedPhoto, setStatus: (s: ActionStatus) => void) => void;
+  onRecompress: (item: CompressedPhoto, setStatus: (s: ActionStatus) => void) => void;
 };
 
-function HistoryItem({ item, onDelete }: HistoryItemProps) {
+function HistoryItem({ item, onDelete, onDownload, onRecompress }: HistoryItemProps) {
   const savings = savingsPercent(item.originalSize, item.compressedSize);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [dlStatus, setDlStatus] = useState<ActionStatus>("idle");
+  const [rcStatus, setRcStatus] = useState<ActionStatus>("idle");
 
   const handleDelete = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -111,6 +120,17 @@ function HistoryItem({ item, onDelete }: HistoryItemProps) {
       ]);
     }
   };
+
+  const dlLabel =
+    dlStatus === "loading" ? "İndiriliyor…" :
+    dlStatus === "success" ? "Kaydedildi!" :
+    dlStatus === "error"   ? "Erişilemiyor" :
+    "İndir";
+
+  const rcLabel =
+    rcStatus === "loading" ? "Yükleniyor…" :
+    rcStatus === "error"   ? "Dosya bulunamadı" :
+    "Tekrar Sıkıştır";
 
   return (
     <>
@@ -160,6 +180,67 @@ function HistoryItem({ item, onDelete }: HistoryItemProps) {
             <Ionicons name="trash-outline" size={18} color={Colors.light.textMuted} />
           </Pressable>
         </View>
+
+        {/* Action row */}
+        <View style={styles.actionRow}>
+          <Pressable
+            onPress={() => dlStatus === "idle" && onDownload(item, (s) => {
+              setDlStatus(s);
+              if (s === "success" || s === "error") {
+                setTimeout(() => setDlStatus("idle"), 2500);
+              }
+            })}
+            style={[
+              styles.actionBtn,
+              dlStatus === "success" && styles.actionBtnSuccess,
+              dlStatus === "error"   && styles.actionBtnError,
+            ]}
+            disabled={dlStatus === "loading"}
+          >
+            <Ionicons
+              name={dlStatus === "success" ? "checkmark" : dlStatus === "error" ? "alert-circle-outline" : "download-outline"}
+              size={14}
+              color={
+                dlStatus === "success" ? "#1A8C6A" :
+                dlStatus === "error"   ? Colors.light.coral :
+                Colors.light.lavender
+              }
+            />
+            <Text style={[
+              styles.actionBtnText,
+              dlStatus === "success" && { color: "#1A8C6A" },
+              dlStatus === "error"   && { color: Colors.light.coral },
+            ]}>
+              {dlLabel}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => rcStatus === "idle" && onRecompress(item, (s) => {
+              setRcStatus(s);
+              if (s === "error") {
+                setTimeout(() => setRcStatus("idle"), 3000);
+              }
+            })}
+            style={[
+              styles.actionBtn,
+              rcStatus === "error" && styles.actionBtnError,
+            ]}
+            disabled={rcStatus === "loading"}
+          >
+            <Ionicons
+              name={rcStatus === "error" ? "alert-circle-outline" : "sync-outline"}
+              size={14}
+              color={rcStatus === "error" ? Colors.light.coral : Colors.light.mint}
+            />
+            <Text style={[
+              styles.actionBtnText,
+              { color: rcStatus === "error" ? Colors.light.coral : Colors.light.mint },
+            ]}>
+              {rcLabel}
+            </Text>
+          </Pressable>
+        </View>
       </ClayCard>
 
       {Platform.OS === "web" && (
@@ -181,7 +262,8 @@ function HistoryItem({ item, onDelete }: HistoryItemProps) {
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
-  const { history, removeFromHistory, clearHistory } = useCompression();
+  const router = useRouter();
+  const { history, removeFromHistory, clearHistory, setPendingRecompress } = useCompression();
   const [showClearModal, setShowClearModal] = useState(false);
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
@@ -196,6 +278,65 @@ export default function HistoryScreen() {
         { text: "İptal", style: "cancel" },
         { text: "Temizle", style: "destructive", onPress: clearHistory },
       ]);
+    }
+  };
+
+  const handleDownload = async (item: CompressedPhoto, setStatus: (s: ActionStatus) => void) => {
+    await Haptics.selectionAsync();
+    setStatus("loading");
+    try {
+      if (Platform.OS === "web") {
+        const resp = await fetch(item.compressedUri);
+        if (!resp.ok) throw new Error("stale");
+        const blob = await resp.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const ext = item.format === "png" ? "png" : item.format === "webp" ? "webp" : "jpg";
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = `compressed_${item.fileName.replace(/\.[^.]+$/, "")}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(objectUrl);
+      } else {
+        const info = await FileSystem.getInfoAsync(item.compressedUri);
+        if (!info.exists) throw new Error("stale");
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status !== "granted") {
+          Alert.alert("İzin Gerekli", "Galeriye kaydetmek için lütfen galeri iznini etkinleştirin.", [{ text: "Tamam" }]);
+          setStatus("idle");
+          return;
+        }
+        await MediaLibrary.saveToLibraryAsync(item.compressedUri);
+      }
+      setStatus("success");
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (_) {
+      setStatus("error");
+    }
+  };
+
+  const handleRecompress = async (item: CompressedPhoto, setStatus: (s: ActionStatus) => void) => {
+    await Haptics.selectionAsync();
+    setStatus("loading");
+    try {
+      if (Platform.OS === "web") {
+        const resp = await fetch(item.originalUri);
+        if (!resp.ok) throw new Error("stale");
+      } else {
+        const info = await FileSystem.getInfoAsync(item.originalUri);
+        if (!info.exists) throw new Error("stale");
+      }
+      setPendingRecompress({
+        originalUri: item.originalUri,
+        format: item.format ?? "jpeg",
+        level: item.level ?? "medium",
+        fileName: item.fileName,
+        originalSize: item.originalSize,
+      });
+      router.navigate("/");
+    } catch (_) {
+      setStatus("error");
     }
   };
 
@@ -238,7 +379,12 @@ export default function HistoryScreen() {
           data={history}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <HistoryItem item={item} onDelete={removeFromHistory} />
+            <HistoryItem
+              item={item}
+              onDelete={removeFromHistory}
+              onDownload={handleDownload}
+              onRecompress={handleRecompress}
+            />
           )}
           contentContainerStyle={[
             styles.list,
@@ -309,6 +455,7 @@ const styles = StyleSheet.create({
   },
   historyCard: {
     padding: 14,
+    gap: 12,
   },
   cardRow: {
     flexDirection: "row",
@@ -390,6 +537,31 @@ const styles = StyleSheet.create({
   deleteBtn: {
     padding: 4,
     alignSelf: "flex-start",
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 14,
+    backgroundColor: Colors.light.creamDark,
+  },
+  actionBtnSuccess: {
+    backgroundColor: Colors.light.mintLight,
+  },
+  actionBtnError: {
+    backgroundColor: Colors.light.coral + "18",
+  },
+  actionBtnText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.light.lavender,
   },
   emptyState: {
     flex: 1,

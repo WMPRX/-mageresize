@@ -6,7 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -145,7 +145,7 @@ async function getFileSize(uri: string): Promise<number> {
 
 export default function CompressScreen() {
   const insets = useSafeAreaInsets();
-  const { addToHistory } = useCompression();
+  const { addToHistory, pendingRecompress, setPendingRecompress } = useCompression();
 
   const [photos, setPhotos] = useState<PhotoResult[]>([]);
   const [level, setLevel] = useState<Level>("medium");
@@ -155,6 +155,33 @@ export default function CompressScreen() {
   const [allSaved, setAllSaved] = useState(false);
 
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (!pendingRecompress) return;
+    const load = async () => {
+      const { originalUri, format: pendingFormat, level: pendingLevel, fileName, originalSize } = pendingRecompress;
+      const safeFormat: OutputFormat =
+        pendingFormat === "png" ? "png" : pendingFormat === "webp" ? "webp" : "jpeg";
+      const safeLevel: Level =
+        pendingLevel === "low" ? "low" : pendingLevel === "high" ? "high" : "medium";
+      setFormat(safeFormat);
+      setLevel(safeLevel);
+      setPhotos([{
+        photo: {
+          uri: originalUri,
+          width: 0,
+          height: 0,
+          fileSize: originalSize,
+          fileName,
+        },
+        compressed: null,
+        saved: false,
+      }]);
+      setAllSaved(false);
+      setPendingRecompress(null);
+    };
+    load();
+  }, [pendingRecompress]);
 
   const animatePressIn = () => {
     Animated.spring(scaleAnim, { toValue: 0.96, useNativeDriver: true, speed: 50 }).start();

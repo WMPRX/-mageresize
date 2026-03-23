@@ -103,7 +103,6 @@ export function ComparisonModal({
       onRequestClose={onClose}
       statusBarTranslucent={Platform.OS !== "web"}
     >
-      {/* Outer Pressable dismisses modal on tap anywhere on the backdrop */}
       <Pressable
         style={[
           styles.overlay,
@@ -111,7 +110,6 @@ export function ComparisonModal({
         ]}
         onPress={onClose}
       >
-        {/* Header card — inner View so tap here bubbles up to outer Pressable */}
         <View style={styles.headerCard}>
           <View style={styles.sizeInfo}>
             <Ionicons name="images-outline" size={14} color={Colors.light.textPrimary} />
@@ -129,7 +127,6 @@ export function ComparisonModal({
           </Pressable>
         </View>
 
-        {/* Image comparison — PanResponder claims all touches; tap (no drag) also closes */}
         <View
           style={styles.imageContainer}
           onLayout={handleLayout}
@@ -183,7 +180,6 @@ export function ComparisonModal({
           </View>
         </View>
 
-        {/* Footer — tap on footer also triggers outer Pressable (onClose) */}
         <View style={styles.footer}>
           <View style={styles.footerPill} />
           <Text style={styles.footerHint}>Kapatmak için dokun</Text>
@@ -277,11 +273,11 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 2,
-    backgroundColor: Colors.light.coral,
-    shadowColor: Colors.light.coral,
+    backgroundColor: "#ffffff",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 6,
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
     elevation: 6,
   },
   handleWrapper: {

@@ -543,7 +543,6 @@ export default function CompressScreen() {
                 : 0;
               return (
                 <View key={idx} style={styles.photoGridItem}>
-                  {/* Image area — tap opens comparison for compressed photos */}
                   <Pressable
                     style={styles.gridImageArea}
                     onPress={() => item.compressed && setSelectedComparison(idx)}
@@ -578,7 +577,6 @@ export default function CompressScreen() {
                     )}
                   </Pressable>
 
-                  {/* Size row with share — outside image Pressable to avoid nesting */}
                   <View style={styles.gridSizeRow}>
                     <Text style={styles.gridSizeText}>
                       {formatBytes(item.compressed?.fileSize ?? item.photo.fileSize)}

@@ -66,7 +66,7 @@ const LEVEL_CONFIG: Record<Level, { label: string; desc: string; color: string; 
   },
   high: {
     label: "Yüksek",
-    desc: "Kayıpsız ~%10-30",
+    desc: "~%15-25 küçültme",
     color: Colors.light.mint,
     bg: Colors.light.mint + "28",
   },
@@ -85,9 +85,9 @@ function getCompressionSettings(level: Level, format: OutputFormat): {
 } {
   if (level === "high") {
     if (format === "png") {
-      return { saveFormat: ImageManipulator.SaveFormat.PNG, compress: 1.0, actualFormat: "png" };
+      return { saveFormat: ImageManipulator.SaveFormat.PNG, compress: 0.92, actualFormat: "png" };
     }
-    return { saveFormat: ImageManipulator.SaveFormat.WEBP, compress: 1.0, actualFormat: "webp" };
+    return { saveFormat: ImageManipulator.SaveFormat.WEBP, compress: 0.92, actualFormat: "webp" };
   }
   if (level === "medium") {
     return { saveFormat: ImageManipulator.SaveFormat.WEBP, compress: 0.80, actualFormat: "webp" };
@@ -505,6 +505,16 @@ export default function CompressScreen() {
                   <Ionicons name="information-circle-outline" size={14} color={Colors.light.textMuted} />
                   <Text style={styles.infoText}>
                     Orta seviyede WEBP kullanılır (en iyi denge)
+                  </Text>
+                </View>
+              )}
+
+              {/* Warning when High + PNG is selected */}
+              {level === "high" && format === "png" && (
+                <View style={[styles.infoRow, { backgroundColor: Colors.light.peach + "22", borderRadius: 10, padding: 8 }]}>
+                  <Ionicons name="warning-outline" size={14} color={Colors.light.peach} />
+                  <Text style={[styles.infoText, { color: Colors.light.peach }]}>
+                    PNG kayıpsız formattır — fotoğraflar için boyut artabilir
                   </Text>
                 </View>
               )}

@@ -46,6 +46,7 @@ export function ComparisonModal({
   const containerWidthRef = useRef(SCREEN_W);
   const fractionRef = useRef(0.5);
   const startFractionRef = useRef(0.5);
+  const didDragRef = useRef(false);
   const [fraction, setFractionState] = useState(0.5);
 
   const setFraction = (v: number) => {
@@ -60,8 +61,12 @@ export function ComparisonModal({
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: () => {
           startFractionRef.current = fractionRef.current;
+          didDragRef.current = false;
         },
         onPanResponderMove: (_, gs) => {
+          if (Math.abs(gs.dx) > 4) {
+            didDragRef.current = true;
+          }
           const w = containerWidthRef.current;
           const next = Math.max(
             0.02,
@@ -70,8 +75,13 @@ export function ComparisonModal({
           fractionRef.current = next;
           setFractionState(next);
         },
+        onPanResponderRelease: () => {
+          if (!didDragRef.current) {
+            onClose();
+          }
+        },
       }),
-    []
+    [onClose]
   );
 
   const handleLayout = (e: {
@@ -104,15 +114,13 @@ export function ComparisonModal({
           { paddingTop: insets.top, paddingBottom: insets.bottom },
         ]}
       >
-        {/* Header */}
-        <View style={styles.header}>
+        {/* Clay-styled header card */}
+        <View style={styles.headerCard}>
           <View style={styles.sizeInfo}>
-            <Ionicons name="images-outline" size={14} color="#fff" />
-            <Text style={styles.sizeText}>{formatBytes(originalSize)}</Text>
-            <Ionicons name="arrow-forward" size={12} color={Colors.light.mint} />
-            <Text style={[styles.sizeText, { color: Colors.light.mint }]}>
-              {formatBytes(compressedSize)}
-            </Text>
+            <Ionicons name="images-outline" size={14} color={Colors.light.textPrimary} />
+            <Text style={styles.sizeOriginal}>{formatBytes(originalSize)}</Text>
+            <Ionicons name="arrow-forward" size={12} color={Colors.light.coral} />
+            <Text style={[styles.sizeCompressed]}>{formatBytes(compressedSize)}</Text>
             {savings > 0 && (
               <View style={styles.savingsBadge}>
                 <Text style={styles.savingsText}>-%{savings}</Text>
@@ -120,7 +128,7 @@ export function ComparisonModal({
             )}
           </View>
           <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={12}>
-            <Ionicons name="close" size={22} color="#fff" />
+            <Ionicons name="close" size={20} color={Colors.light.textPrimary} />
           </Pressable>
         </View>
 
@@ -152,33 +160,46 @@ export function ComparisonModal({
             />
           </View>
 
-          {/* Divider line */}
+          {/* Coral divider line */}
           <View
             style={[styles.dividerLine, { left: sliderPx - 1 }]}
             pointerEvents="none"
           />
 
-          {/* Handle */}
+          {/* Handle — centered via wrapper trick, no type casts */}
           <View
-            style={[styles.handle, { left: sliderPx - HANDLE_SIZE / 2 }]}
+            style={[styles.handleWrapper, { left: sliderPx - HANDLE_SIZE / 2 }]}
             pointerEvents="none"
           >
-            <Ionicons name="chevron-back" size={14} color={Colors.light.coral} />
-            <Ionicons name="chevron-forward" size={14} color={Colors.light.coral} />
+            <View style={styles.handle}>
+              <Ionicons name="chevron-back" size={14} color={Colors.light.coral} />
+              <Ionicons name="chevron-forward" size={14} color={Colors.light.coral} />
+            </View>
           </View>
 
           {/* Before label */}
-          <View style={[styles.labelContainer, styles.labelLeft]} pointerEvents="none">
+          <View
+            style={[styles.labelContainer, styles.labelLeft]}
+            pointerEvents="none"
+          >
             <Text style={styles.labelText}>Önce</Text>
           </View>
 
           {/* After label */}
-          <View style={[styles.labelContainer, styles.labelRight]} pointerEvents="none">
+          <View
+            style={[styles.labelContainer, styles.labelRight]}
+            pointerEvents="none"
+          >
             <Text style={styles.labelText}>Sonra</Text>
+          </View>
+
+          {/* Hint overlay (shown briefly at start) */}
+          <View style={styles.hintContainer} pointerEvents="none">
+            <Text style={styles.hintText}>← Sürükle →</Text>
           </View>
         </View>
 
-        {/* Footer */}
+        {/* Clay footer */}
         <Pressable style={styles.footer} onPress={onClose}>
           <View style={styles.footerPill} />
           <Text style={styles.footerHint}>Kapatmak için dokun</Text>
@@ -191,15 +212,27 @@ export function ComparisonModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.92)",
+    backgroundColor: "rgba(30,20,40,0.88)",
     flexDirection: "column",
   },
-  header: {
+  headerCard: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 12,
+    backgroundColor: Colors.light.cream,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: Colors.light.coral,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 8,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.8)",
   },
   sizeInfo: {
     flexDirection: "row",
@@ -208,13 +241,18 @@ const styles = StyleSheet.create({
     flex: 1,
     flexWrap: "wrap",
   },
-  sizeText: {
-    color: "#fff",
+  sizeOriginal: {
+    color: Colors.light.textSecondary,
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
   },
+  sizeCompressed: {
+    color: Colors.light.coral,
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+  },
   savingsBadge: {
-    backgroundColor: Colors.light.mint,
+    backgroundColor: Colors.light.mintLight,
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -225,19 +263,24 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
   },
   closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.light.creamDark,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 12,
+    marginLeft: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,107,107,0.2)",
   },
   imageContainer: {
     flex: 1,
     overflow: "hidden",
-    backgroundColor: "#111",
-    position: "relative",
+    backgroundColor: "#0D0D14",
+    marginHorizontal: 0,
+    borderTopWidth: 1.5,
+    borderBottomWidth: 1.5,
+    borderColor: Colors.light.coral + "40",
   },
   clipView: {
     position: "absolute",
@@ -251,37 +294,46 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 2,
-    backgroundColor: "#fff",
-    shadowColor: "#000",
+    backgroundColor: Colors.light.coral,
+    shadowColor: Colors.light.coral,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 4,
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
     elevation: 6,
   },
-  handle: {
+  handleWrapper: {
     position: "absolute",
-    top: "50%" as unknown as number,
-    marginTop: -(HANDLE_SIZE / 2),
+    top: 0,
+    bottom: 0,
+    width: HANDLE_SIZE,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  handle: {
     width: HANDLE_SIZE,
     height: HANDLE_SIZE,
     borderRadius: HANDLE_SIZE / 2,
-    backgroundColor: "#fff",
+    backgroundColor: Colors.light.cream,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    shadowColor: "#000",
+    shadowColor: Colors.light.coral,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.4,
     shadowRadius: 8,
-    elevation: 10,
+    elevation: 12,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.9)",
   },
   labelContainer: {
     position: "absolute",
     top: 14,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: Colors.light.cream + "EE",
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,107,107,0.25)",
   },
   labelLeft: {
     left: 14,
@@ -290,25 +342,40 @@ const styles = StyleSheet.create({
     right: 14,
   },
   labelText: {
-    color: "#fff",
+    color: Colors.light.textPrimary,
     fontSize: 12,
     fontFamily: "Inter_700Bold",
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
+  },
+  hintContainer: {
+    position: "absolute",
+    bottom: 14,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
+  hintText: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+    letterSpacing: 0.5,
   },
   footer: {
     alignItems: "center",
     paddingVertical: 14,
     gap: 6,
+    backgroundColor: Colors.light.cream + "15",
   },
   footerPill: {
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.25)",
+    backgroundColor: Colors.light.coral + "55",
   },
   footerHint: {
-    color: "rgba(255,255,255,0.4)",
+    color: "rgba(255,255,255,0.45)",
     fontSize: 11,
     fontFamily: "Inter_400Regular",
+    letterSpacing: 0.3,
   },
 });

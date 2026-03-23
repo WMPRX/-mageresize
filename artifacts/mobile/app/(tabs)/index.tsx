@@ -305,6 +305,16 @@ export default function CompressScreen() {
 
   const sharePhoto = async (uri: string, photoFormat: OutputFormat) => {
     await Haptics.selectionAsync();
+    if (Platform.OS === "web") {
+      const ext = photoFormat === "png" ? "png" : photoFormat === "webp" ? "webp" : "jpg";
+      const a = document.createElement("a");
+      a.href = uri;
+      a.download = `compressed.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
       await Sharing.shareAsync(uri, {

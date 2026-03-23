@@ -550,7 +550,7 @@ export default function CompressScreen() {
                 <View style={styles.outputInfo}>
                   <Text style={styles.outputInfoText}>
                     Çıktı: {willUseFormat.toUpperCase()} ·{" "}
-                    {level === "high" ? "Kayıpsız / maksimum kalite" : level === "medium" ? "WEBP ile akıllı sıkıştırma" : "Maksimum küçültme"}
+                    {level === "high" ? "Yüksek kalite, ~%15-25 küçültme" : level === "medium" ? "WEBP ile akıllı sıkıştırma" : "Maksimum küçültme"}
                   </Text>
                 </View>
               )}

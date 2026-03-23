@@ -1,3 +1,4 @@
+import Slider from "@react-native-community/slider";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system";
 import * as Haptics from "expo-haptics";
@@ -5,11 +6,13 @@ import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
+import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
   Animated,
   Dimensions,
+  FlatList,
   Image,
   Platform,
   Pressable,
@@ -18,7 +21,6 @@ import {
   Text,
   View,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ClayCard } from "@/components/ClayCard";
@@ -40,176 +42,182 @@ type CompressResult = {
   fileSize: number;
 };
 
+type PhotoResult = {
+  photo: SelectedPhoto;
+  compressed: CompressResult | null;
+  saved: boolean;
+};
+
 function formatBytes(bytes: number): string {
+  if (bytes <= 0) return "Bilinmiyor";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 function savingsPercent(original: number, compressed: number): number {
-  return Math.round(((original - compressed) / original) * 100);
+  if (!original || !compressed) return 0;
+  return Math.max(0, Math.round(((original - compressed) / original) * 100));
+}
+
+function qualityLabel(q: number): string {
+  if (q < 0.65) return "Küçük";
+  if (q < 0.75) return "Düşük";
+  if (q < 0.82) return "Orta";
+  if (q < 0.9) return "Yüksek";
+  return "Çok Yüksek";
 }
 
 export default function CompressScreen() {
   const insets = useSafeAreaInsets();
   const { addToHistory } = useCompression();
 
-  const [selected, setSelected] = useState<SelectedPhoto | null>(null);
+  const [photos, setPhotos] = useState<PhotoResult[]>([]);
   const [quality, setQuality] = useState(0.75);
-  const [compressed, setCompressed] = useState<CompressResult | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [allSaved, setAllSaved] = useState(false);
 
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
 
   const animatePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.96,
-      useNativeDriver: true,
-      speed: 50,
-    }).start();
+    Animated.spring(scaleAnim, { toValue: 0.96, useNativeDriver: true, speed: 50 }).start();
   };
   const animatePressOut = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      useNativeDriver: true,
-      speed: 30,
-    }).start();
+    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30 }).start();
   };
 
-  const pickImage = async () => {
+  const pickImages = async () => {
     await Haptics.selectionAsync();
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
-      allowsMultipleSelection: false,
+      allowsMultipleSelection: true,
       quality: 1,
     });
 
     if (!result.canceled && result.assets.length > 0) {
-      const asset = result.assets[0];
-      let fileSize = asset.fileSize ?? 0;
-
-      if (!fileSize && asset.uri) {
-        try {
-          const info = await FileSystem.getInfoAsync(asset.uri, { size: true });
-          fileSize = info.exists ? (info as any).size ?? 0 : 0;
-        } catch (_) {}
-      }
-
-      setSelected({
-        uri: asset.uri,
-        width: asset.width ?? 0,
-        height: asset.height ?? 0,
-        fileSize,
-        fileName: asset.fileName ?? `photo_${Date.now()}.jpg`,
-      });
-      setCompressed(null);
-      setSaveSuccess(false);
+      const newPhotos: PhotoResult[] = await Promise.all(
+        result.assets.map(async (asset) => {
+          let fileSize = asset.fileSize ?? 0;
+          if (!fileSize && asset.uri) {
+            try {
+              const info = await FileSystem.getInfoAsync(asset.uri, { size: true });
+              if (info.exists && "size" in info) {
+                fileSize = info.size;
+              }
+            } catch (_) {}
+          }
+          return {
+            photo: {
+              uri: asset.uri,
+              width: asset.width ?? 0,
+              height: asset.height ?? 0,
+              fileSize,
+              fileName: asset.fileName ?? `photo_${Date.now()}.jpg`,
+            },
+            compressed: null,
+            saved: false,
+          };
+        })
+      );
+      setPhotos(newPhotos);
+      setAllSaved(false);
     }
   };
 
-  const compress = async () => {
-    if (!selected) return;
+  const compressAll = async () => {
+    if (photos.length === 0) return;
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsCompressing(true);
-    setCompressed(null);
-    setSaveSuccess(false);
+    setAllSaved(false);
 
-    try {
-      const result = await ImageManipulator.manipulateAsync(
-        selected.uri,
-        [],
-        {
-          compress: quality,
-          format: ImageManipulator.SaveFormat.JPEG,
-        }
-      );
-
-      let compressedSize = 0;
+    const updated: PhotoResult[] = [...photos];
+    for (let i = 0; i < photos.length; i++) {
+      const p = photos[i];
       try {
-        const info = await FileSystem.getInfoAsync(result.uri, { size: true });
-        compressedSize = info.exists ? (info as any).size ?? 0 : 0;
-      } catch (_) {}
+        const result = await ImageManipulator.manipulateAsync(
+          p.photo.uri,
+          [],
+          { compress: quality, format: ImageManipulator.SaveFormat.JPEG }
+        );
 
-      setCompressed({ uri: result.uri, fileSize: compressedSize });
+        let compressedSize = 0;
+        try {
+          const info = await FileSystem.getInfoAsync(result.uri, { size: true });
+          if (info.exists && "size" in info) {
+            compressedSize = info.size;
+          }
+        } catch (_) {}
 
-      await addToHistory({
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-        originalUri: selected.uri,
-        compressedUri: result.uri,
-        originalSize: selected.fileSize,
-        compressedSize,
-        quality,
-        savedAt: Date.now(),
-        fileName: selected.fileName,
-      });
+        updated[i] = { ...p, compressed: { uri: result.uri, fileSize: compressedSize } };
 
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (e) {
-      console.error("Compression error", e);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    } finally {
-      setIsCompressing(false);
+        await addToHistory({
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+          originalUri: p.photo.uri,
+          compressedUri: result.uri,
+          originalSize: p.photo.fileSize,
+          compressedSize,
+          quality,
+          savedAt: Date.now(),
+          fileName: p.photo.fileName,
+        });
+      } catch (e) {
+        console.error("Compression error for photo", i, e);
+      }
     }
+    setPhotos(updated);
+    setIsCompressing(false);
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  const saveToGallery = async () => {
-    if (!compressed) return;
+  const saveAll = async () => {
+    if (photos.every((p) => p.compressed === null)) return;
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIsSaving(true);
+    setIsSavingAll(true);
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== "granted") {
-        setIsSaving(false);
+        setIsSavingAll(false);
         return;
       }
-      await MediaLibrary.saveToLibraryAsync(compressed.uri);
-      setSaveSuccess(true);
+      for (const p of photos) {
+        if (p.compressed) {
+          await MediaLibrary.saveToLibraryAsync(p.compressed.uri);
+        }
+      }
+      setPhotos((prev) => prev.map((p) => ({ ...p, saved: true })));
+      setAllSaved(true);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) {
-      console.error("Save error", e);
+      console.error("Save all error", e);
     } finally {
-      setIsSaving(false);
+      setIsSavingAll(false);
     }
   };
 
-  const share = async () => {
-    if (!compressed) return;
+  const sharePhoto = async (uri: string) => {
     await Haptics.selectionAsync();
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
-      await Sharing.shareAsync(compressed.uri, {
+      await Sharing.shareAsync(uri, {
         mimeType: "image/jpeg",
         dialogTitle: "Sıkıştırılmış fotoğrafı paylaş",
       });
     }
   };
 
-  const qualitySteps = [0.5, 0.65, 0.75, 0.85, 0.95];
-  const qualityLabels: Record<number, string> = {
-    0.5: "Küçük",
-    0.65: "Düşük",
-    0.75: "Orta",
-    0.85: "Yüksek",
-    0.95: "Çok Yüksek",
-  };
+  const hasCompressed = photos.some((p) => p.compressed !== null);
+  const allCompressed = photos.length > 0 && photos.every((p) => p.compressed !== null);
 
-  const estimatedSize = selected
-    ? Math.round(selected.fileSize * quality * 0.8)
-    : 0;
-
-  const savings = compressed
-    ? savingsPercent(selected?.fileSize ?? 0, compressed.fileSize)
-    : selected
-    ? savingsPercent(selected.fileSize, estimatedSize)
-    : 0;
+  const totalOriginal = photos.reduce((s, p) => s + p.photo.fileSize, 0);
+  const totalCompressed = photos.reduce((s, p) => s + (p.compressed?.fileSize ?? 0), 0);
+  const overallSavings = hasCompressed ? savingsPercent(totalOriginal, totalCompressed) : 0;
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomInset = Platform.OS === "web" ? 34 : 0;
 
   return (
-    <View style={[styles.container, { backgroundColor: Colors.light.cream }]}>
+    <View style={styles.container}>
       <LinearGradient
         colors={["#FFF4F0", "#FFE8F5", "#EEE6FF"]}
         start={{ x: 0, y: 0 }}
@@ -227,42 +235,23 @@ export default function CompressScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Fotoğraf Sıkıştırıcı</Text>
-          <Text style={styles.headerSubtitle}>
-            Kalite kaybetmeden dosya küçültün
-          </Text>
+          <Text style={styles.headerSubtitle}>Kalite kaybetmeden dosya küçültün</Text>
         </View>
 
         {/* Pick Photo Card */}
-        <Animated.View style={[{ transform: [{ scale: scaleAnim }] }]}>
-          <Pressable
-            onPress={pickImage}
-            onPressIn={animatePressIn}
-            onPressOut={animatePressOut}
-          >
-            <ClayCard
-              style={[
-                styles.pickCard,
-                { borderStyle: selected ? "solid" : "dashed" },
-              ]}
-              color={selected ? Colors.light.card : Colors.light.cream}
-            >
-              {selected ? (
-                <View style={styles.imagePreviewContainer}>
-                  <Image
-                    source={{ uri: selected.uri }}
-                    style={styles.previewImage}
-                    resizeMode="cover"
-                  />
-                  <View style={styles.imageOverlay}>
-                    <View style={styles.imageBadge}>
-                      <Ionicons name="images" size={14} color={Colors.light.coral} />
-                      <Text style={styles.imageBadgeText}>
-                        {formatBytes(selected.fileSize)}
-                      </Text>
-                    </View>
+        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+          <Pressable onPress={pickImages} onPressIn={animatePressIn} onPressOut={animatePressOut}>
+            <ClayCard style={[styles.pickCard, { borderStyle: photos.length > 0 ? "solid" : "dashed" }]}>
+              {photos.length > 0 ? (
+                <View style={styles.selectedHeader}>
+                  <View style={styles.selectedBadge}>
+                    <Ionicons name="images" size={14} color={Colors.light.coral} />
+                    <Text style={styles.selectedBadgeText}>
+                      {photos.length} fotoğraf seçildi
+                    </Text>
                   </View>
-                  <Pressable style={styles.changeBtn} onPress={pickImage}>
-                    <Ionicons name="sync" size={16} color="#fff" />
+                  <Pressable onPress={pickImages} style={styles.changeBtn}>
+                    <Ionicons name="sync" size={14} color="#fff" />
                     <Text style={styles.changeBtnText}>Değiştir</Text>
                   </Pressable>
                 </View>
@@ -273,7 +262,7 @@ export default function CompressScreen() {
                   </View>
                   <Text style={styles.emptyTitle}>Fotoğraf Seç</Text>
                   <Text style={styles.emptySubtitle}>
-                    Galeriden bir fotoğraf seçmek için dokun
+                    Birden fazla fotoğraf seçebilirsiniz
                   </Text>
                 </View>
               )}
@@ -281,9 +270,44 @@ export default function CompressScreen() {
           </Pressable>
         </Animated.View>
 
-        {selected && (
+        {/* Photo Grid */}
+        {photos.length > 0 && (
+          <View style={styles.photoGrid}>
+            {photos.map((item, idx) => {
+              const savings = item.compressed
+                ? savingsPercent(item.photo.fileSize, item.compressed.fileSize)
+                : 0;
+              return (
+                <View key={idx} style={styles.photoGridItem}>
+                  <Image
+                    source={{ uri: item.compressed?.uri ?? item.photo.uri }}
+                    style={styles.gridImage}
+                    resizeMode="cover"
+                  />
+                  {item.compressed && (
+                    <View style={styles.gridSavingsBadge}>
+                      <Text style={styles.gridSavingsText}>-{savings}%</Text>
+                    </View>
+                  )}
+                  <View style={styles.gridSizeRow}>
+                    <Text style={styles.gridSizeText}>
+                      {formatBytes(item.compressed?.fileSize ?? item.photo.fileSize)}
+                    </Text>
+                    {item.compressed && (
+                      <Pressable onPress={() => sharePhoto(item.compressed!.uri)} hitSlop={6}>
+                        <Ionicons name="share-outline" size={14} color={Colors.light.coral} />
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {photos.length > 0 && (
           <>
-            {/* Quality Selector */}
+            {/* Quality Slider Card */}
             <ClayCard style={styles.qualityCard}>
               <View style={styles.qualityHeader}>
                 <View style={styles.qualityTitleRow}>
@@ -292,66 +316,52 @@ export default function CompressScreen() {
                 </View>
                 <View style={[styles.qualityBadge, { backgroundColor: Colors.light.lavenderLight }]}>
                   <Text style={[styles.qualityBadgeText, { color: "#7B4CCC" }]}>
-                    {qualityLabels[quality]}
+                    {qualityLabel(quality)} · %{Math.round(quality * 100)}
                   </Text>
                 </View>
               </View>
 
-              <View style={styles.qualitySteps}>
-                {qualitySteps.map((q) => (
-                  <Pressable
-                    key={q}
-                    onPress={() => {
-                      setQuality(q);
-                      setCompressed(null);
-                      setSaveSuccess(false);
-                      Haptics.selectionAsync();
-                    }}
-                    style={[
-                      styles.qualityStep,
-                      quality === q && styles.qualityStepActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.qualityStepLabel,
-                        quality === q && styles.qualityStepLabelActive,
-                      ]}
-                    >
-                      {qualityLabels[q]}
-                    </Text>
-                    <View
-                      style={[
-                        styles.qualityDot,
-                        quality === q && { backgroundColor: Colors.light.coral },
-                      ]}
-                    />
-                  </Pressable>
-                ))}
+              <Slider
+                style={styles.slider}
+                minimumValue={0.6}
+                maximumValue={0.95}
+                step={0.01}
+                value={quality}
+                onValueChange={(val) => {
+                  setQuality(val);
+                }}
+                onSlidingComplete={() => Haptics.selectionAsync()}
+                minimumTrackTintColor={Colors.light.coral}
+                maximumTrackTintColor={Colors.light.creamDark}
+                thumbTintColor={Colors.light.coral}
+              />
+
+              <View style={styles.sliderLabels}>
+                <Text style={styles.sliderLabel}>Küçük · %60</Text>
+                <Text style={styles.sliderLabel}>Yüksek · %95</Text>
               </View>
 
+              {/* Size summary */}
               <View style={styles.estimateRow}>
                 <View style={styles.estimateItem}>
-                  <Text style={styles.estimateLabel}>Orijinal</Text>
-                  <Text style={styles.estimateValue}>
-                    {formatBytes(selected.fileSize)}
-                  </Text>
+                  <Text style={styles.estimateLabel}>Toplam Orijinal</Text>
+                  <Text style={styles.estimateValue}>{formatBytes(totalOriginal)}</Text>
                 </View>
                 <Ionicons name="arrow-forward" size={16} color={Colors.light.textMuted} />
                 <View style={styles.estimateItem}>
                   <Text style={styles.estimateLabel}>
-                    {compressed ? "Sıkıştırılmış" : "Tahmini"}
+                    {hasCompressed ? "Sıkıştırılmış" : "Tahmini"}
                   </Text>
                   <Text style={[styles.estimateValue, { color: Colors.light.coral }]}>
-                    {compressed
-                      ? formatBytes(compressed.fileSize)
-                      : `~${formatBytes(estimatedSize)}`}
+                    {hasCompressed
+                      ? formatBytes(totalCompressed)
+                      : `~${formatBytes(Math.round(totalOriginal * quality * 0.8))}`}
                   </Text>
                 </View>
-                {savings > 0 && (
+                {overallSavings > 0 && (
                   <View style={[styles.savingsBadge, { backgroundColor: Colors.light.mintLight }]}>
                     <Text style={[styles.savingsText, { color: "#1A8C6A" }]}>
-                      -{savings}%
+                      -{overallSavings}%
                     </Text>
                   </View>
                 )}
@@ -360,7 +370,7 @@ export default function CompressScreen() {
 
             {/* Compress Button */}
             <Pressable
-              onPress={compress}
+              onPress={compressAll}
               disabled={isCompressing}
               style={({ pressed }) => [{ opacity: pressed || isCompressing ? 0.85 : 1 }]}
             >
@@ -376,109 +386,77 @@ export default function CompressScreen() {
                   <Ionicons name="flash" size={22} color="#fff" />
                 )}
                 <Text style={styles.compressBtnText}>
-                  {isCompressing ? "Sıkıştırılıyor..." : "Sıkıştır"}
+                  {isCompressing
+                    ? "Sıkıştırılıyor..."
+                    : `${photos.length} Fotoğrafı Sıkıştır`}
                 </Text>
               </LinearGradient>
             </Pressable>
 
-            {/* Result Card */}
-            {compressed && (
-              <ClayCard
-                style={styles.resultCard}
-                color={Colors.light.card}
-                elevated
-              >
-                <View style={styles.resultHeader}>
+            {/* Save All */}
+            {allCompressed && (
+              <ClayCard style={styles.resultSummary} color={Colors.light.card} elevated>
+                <View style={styles.resultSummaryHeader}>
                   <View style={[styles.resultIconCircle, { backgroundColor: Colors.light.mintLight }]}>
                     <Ionicons name="checkmark-circle" size={24} color="#1A8C6A" />
                   </View>
                   <View style={styles.resultTextBlock}>
-                    <Text style={styles.resultTitle}>Harika! Sıkıştırıldı</Text>
+                    <Text style={styles.resultTitle}>
+                      {photos.length} fotoğraf sıkıştırıldı!
+                    </Text>
                     <Text style={styles.resultSubtitle}>
-                      %{savings} daha küçük •{" "}
-                      {formatBytes(selected.fileSize - compressed.fileSize)} kazanıldı
+                      Toplam %{overallSavings} küçüldü ·{" "}
+                      {formatBytes(totalOriginal - totalCompressed)} kazanıldı
                     </Text>
                   </View>
                 </View>
 
-                <Image
-                  source={{ uri: compressed.uri }}
-                  style={styles.resultImage}
-                  resizeMode="cover"
-                />
-
-                <View style={styles.actionRow}>
-                  <Pressable
-                    onPress={saveToGallery}
-                    disabled={isSaving || saveSuccess}
+                <Pressable
+                  onPress={saveAll}
+                  disabled={isSavingAll || allSaved}
+                  style={[
+                    styles.saveAllBtn,
+                    {
+                      backgroundColor: allSaved
+                        ? Colors.light.mintLight
+                        : Colors.light.lavenderLight,
+                    },
+                  ]}
+                >
+                  {isSavingAll ? (
+                    <ActivityIndicator size="small" color={Colors.light.lavender} />
+                  ) : (
+                    <Ionicons
+                      name={allSaved ? "checkmark" : "download-outline"}
+                      size={20}
+                      color={allSaved ? "#1A8C6A" : "#7B4CCC"}
+                    />
+                  )}
+                  <Text
                     style={[
-                      styles.actionBtn,
-                      {
-                        backgroundColor: saveSuccess
-                          ? Colors.light.mintLight
-                          : Colors.light.lavenderLight,
-                        flex: 1,
-                      },
+                      styles.saveAllBtnText,
+                      { color: allSaved ? "#1A8C6A" : "#7B4CCC" },
                     ]}
                   >
-                    {isSaving ? (
-                      <ActivityIndicator size="small" color={Colors.light.lavender} />
-                    ) : (
-                      <Ionicons
-                        name={saveSuccess ? "checkmark" : "download-outline"}
-                        size={20}
-                        color={saveSuccess ? "#1A8C6A" : "#7B4CCC"}
-                      />
-                    )}
-                    <Text
-                      style={[
-                        styles.actionBtnText,
-                        {
-                          color: saveSuccess ? "#1A8C6A" : "#7B4CCC",
-                        },
-                      ]}
-                    >
-                      {saveSuccess ? "Kaydedildi!" : "Kaydet"}
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    onPress={share}
-                    style={[
-                      styles.actionBtn,
-                      {
-                        backgroundColor: Colors.light.peachLight,
-                        flex: 1,
-                      },
-                    ]}
-                  >
-                    <Ionicons name="share-outline" size={20} color="#C77B00" />
-                    <Text style={[styles.actionBtnText, { color: "#C77B00" }]}>
-                      Paylaş
-                    </Text>
-                  </Pressable>
-                </View>
+                    {allSaved ? "Galeriye Kaydedildi!" : "Tümünü Galeriye Kaydet"}
+                  </Text>
+                </Pressable>
               </ClayCard>
             )}
           </>
         )}
 
-        {/* Stats hint when no photo */}
-        {!selected && (
+        {/* Feature pills when empty */}
+        {photos.length === 0 && (
           <View style={styles.featureRow}>
             {[
-              { icon: "flash", color: Colors.light.coral, label: "Hızlı" },
-              { icon: "shield-checkmark", color: Colors.light.lavender, label: "Güvenli" },
-              { icon: "leaf", color: Colors.light.mint, label: "Kaliteli" },
+              { icon: "flash" as const, color: Colors.light.coral, label: "Hızlı" },
+              { icon: "shield-checkmark" as const, color: Colors.light.lavender, label: "Güvenli" },
+              { icon: "leaf" as const, color: Colors.light.mint, label: "Kaliteli" },
             ].map((f) => (
               <ClayCard key={f.label} style={styles.featureCard} color={Colors.light.card}>
-                <View
-                  style={[
-                    styles.featureIcon,
-                    { backgroundColor: f.color + "22" },
-                  ]}
-                >
-                  <Ionicons name={f.icon as any} size={24} color={f.color} />
+                <View style={[styles.featureIcon, { backgroundColor: f.color + "22" }]}>
+                  <Ionicons name={f.icon} size={24} color={f.color} />
                 </View>
                 <Text style={styles.featureLabel}>{f.label}</Text>
               </ClayCard>
@@ -489,6 +467,8 @@ export default function CompressScreen() {
     </View>
   );
 }
+
+const GRID_ITEM_SIZE = (SCREEN_W - 40 - 12 * 2) / 3;
 
 const styles = StyleSheet.create({
   container: {
@@ -518,18 +498,52 @@ const styles = StyleSheet.create({
     borderColor: "rgba(201, 168, 255, 0.4)",
     padding: 0,
     overflow: "hidden",
-    minHeight: 200,
+    minHeight: 100,
+  },
+  selectedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 16,
+  },
+  selectedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: Colors.light.coral + "15",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  selectedBadgeText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.light.coral,
+  },
+  changeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: Colors.light.coral,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  changeBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
   },
   emptyPick: {
     alignItems: "center",
     justifyContent: "center",
-    padding: 40,
+    padding: 36,
     gap: 12,
   },
   iconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: Colors.light.coral + "15",
     alignItems: "center",
     justifyContent: "center",
@@ -545,63 +559,48 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
     textAlign: "center",
   },
-  imagePreviewContainer: {
-    width: "100%",
-    height: 220,
-    position: "relative",
+  photoGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
-  previewImage: {
-    width: "100%",
-    height: "100%",
+  photoGridItem: {
+    width: GRID_ITEM_SIZE,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: Colors.light.creamDark,
   },
-  imageOverlay: {
+  gridImage: {
+    width: "100%",
+    height: GRID_ITEM_SIZE,
+  },
+  gridSavingsBadge: {
     position: "absolute",
-    top: 12,
-    left: 12,
+    top: 6,
+    right: 6,
+    backgroundColor: Colors.light.mint,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
-  imageBadge: {
+  gridSavingsText: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    color: "#1A8C6A",
+  },
+  gridSizeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    justifyContent: "space-between",
+    padding: 6,
   },
-  imageBadgeText: {
-    fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
-    color: Colors.light.textPrimary,
-  },
-  changeBtn: {
-    position: "absolute",
-    bottom: 12,
-    right: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: Colors.light.coral,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    shadowColor: Colors.light.coral,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  changeBtnText: {
-    fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
-    color: "#fff",
+  gridSizeText: {
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    color: Colors.light.textSecondary,
   },
   qualityCard: {
-    gap: 16,
+    gap: 12,
   },
   qualityHeader: {
     flexDirection: "row",
@@ -627,37 +626,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
   },
-  qualitySteps: {
+  slider: {
+    width: "100%",
+    height: 40,
+  },
+  sliderLabels: {
     flexDirection: "row",
-    gap: 8,
+    justifyContent: "space-between",
+    marginTop: -4,
   },
-  qualityStep: {
-    flex: 1,
-    alignItems: "center",
-    gap: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    borderRadius: 16,
-    backgroundColor: Colors.light.creamDark,
-  },
-  qualityStepActive: {
-    backgroundColor: Colors.light.coral + "15",
-  },
-  qualityStepLabel: {
-    fontSize: 10,
-    fontFamily: "Inter_500Medium",
-    color: Colors.light.textSecondary,
-    textAlign: "center",
-  },
-  qualityStepLabelActive: {
-    color: Colors.light.coral,
-    fontFamily: "Inter_600SemiBold",
-  },
-  qualityDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.light.textMuted,
+  sliderLabel: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.light.textMuted,
   },
   estimateRow: {
     flexDirection: "row",
@@ -667,6 +648,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
     gap: 8,
+    marginTop: 4,
   },
   estimateItem: {
     alignItems: "center",
@@ -678,7 +660,7 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
   },
   estimateValue: {
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: "Inter_700Bold",
     color: Colors.light.textPrimary,
     marginTop: 2,
@@ -699,11 +681,6 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 18,
     borderRadius: 24,
-    shadowColor: Colors.light.coral,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 8,
   },
   compressBtnText: {
     fontSize: 17,
@@ -711,11 +688,11 @@ const styles = StyleSheet.create({
     color: "#fff",
     letterSpacing: 0.3,
   },
-  resultCard: {
-    gap: 16,
+  resultSummary: {
+    gap: 14,
     padding: 16,
   },
-  resultHeader: {
+  resultSummaryHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
@@ -741,24 +718,15 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
     marginTop: 2,
   },
-  resultImage: {
-    width: "100%",
-    height: 180,
-    borderRadius: 16,
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  actionBtn: {
+  saveAllBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 10,
     paddingVertical: 14,
     borderRadius: 18,
   },
-  actionBtnText: {
+  saveAllBtnText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
   },

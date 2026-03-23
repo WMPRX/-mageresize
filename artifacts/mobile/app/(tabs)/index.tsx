@@ -10,9 +10,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
-  FlatList,
   Image,
   Platform,
   Pressable,
@@ -178,6 +178,11 @@ export default function CompressScreen() {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== "granted") {
         setIsSavingAll(false);
+        Alert.alert(
+          "İzin Gerekli",
+          "Fotoğrafları galeriye kaydetmek için lütfen ayarlardan galeri iznini etkinleştirin.",
+          [{ text: "Tamam" }]
+        );
         return;
       }
       for (const p of photos) {

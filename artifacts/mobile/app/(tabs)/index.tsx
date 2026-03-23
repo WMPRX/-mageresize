@@ -60,6 +60,25 @@ function savingsPercent(original: number, compressed: number): number {
   return Math.max(0, Math.round(((original - compressed) / original) * 100));
 }
 
+async function getFileSize(uri: string): Promise<number> {
+  if (Platform.OS === "web") {
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      return blob.size;
+    } catch (_) {
+      return 0;
+    }
+  }
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists && info.size !== undefined) {
+      return info.size;
+    }
+  } catch (_) {}
+  return 0;
+}
+
 function qualityLabel(q: number): string {
   if (q < 0.65) return "Küçük";
   if (q < 0.75) return "Düşük";
@@ -100,12 +119,7 @@ export default function CompressScreen() {
         result.assets.map(async (asset) => {
           let fileSize = asset.fileSize ?? 0;
           if (!fileSize && asset.uri) {
-            try {
-              const info = await FileSystem.getInfoAsync(asset.uri);
-              if (info.exists && info.size !== undefined) {
-                fileSize = info.size;
-              }
-            } catch (_) {}
+            fileSize = await getFileSize(asset.uri);
           }
           return {
             photo: {
@@ -141,13 +155,7 @@ export default function CompressScreen() {
           { compress: quality, format: ImageManipulator.SaveFormat.JPEG }
         );
 
-        let compressedSize = 0;
-        try {
-          const info = await FileSystem.getInfoAsync(result.uri);
-          if (info.exists && info.size !== undefined) {
-            compressedSize = info.size;
-          }
-        } catch (_) {}
+        const compressedSize = await getFileSize(result.uri);
 
         updated[i] = { ...p, compressed: { uri: result.uri, fileSize: compressedSize } };
 
@@ -175,19 +183,32 @@ export default function CompressScreen() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsSavingAll(true);
     try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== "granted") {
-        setIsSavingAll(false);
-        Alert.alert(
-          "İzin Gerekli",
-          "Fotoğrafları galeriye kaydetmek için lütfen ayarlardan galeri iznini etkinleştirin.",
-          [{ text: "Tamam" }]
-        );
-        return;
-      }
-      for (const p of photos) {
-        if (p.compressed) {
-          await MediaLibrary.saveToLibraryAsync(p.compressed.uri);
+      if (Platform.OS === "web") {
+        for (const p of photos) {
+          if (p.compressed) {
+            const a = document.createElement("a");
+            a.href = p.compressed.uri;
+            a.download = `compressed_${p.photo.fileName}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+        }
+      } else {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status !== "granted") {
+          setIsSavingAll(false);
+          Alert.alert(
+            "İzin Gerekli",
+            "Fotoğrafları galeriye kaydetmek için lütfen ayarlardan galeri iznini etkinleştirin.",
+            [{ text: "Tamam" }]
+          );
+          return;
+        }
+        for (const p of photos) {
+          if (p.compressed) {
+            await MediaLibrary.saveToLibraryAsync(p.compressed.uri);
+          }
         }
       }
       setPhotos((prev) => prev.map((p) => ({ ...p, saved: true })));

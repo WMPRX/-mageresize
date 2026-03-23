@@ -213,6 +213,7 @@ export default function CompressScreen() {
   const [level, setLevel] = useState<Level>("medium");
   const [format, setFormat] = useState<OutputFormat>("jpeg");
   const [isCompressing, setIsCompressing] = useState(false);
+  const [compressingIdx, setCompressingIdx] = useState<number | null>(null);
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [allSaved, setAllSaved] = useState(false);
 
@@ -347,6 +348,7 @@ export default function CompressScreen() {
 
     for (let i = 0; i < photos.length; i++) {
       const p = photos[i];
+      setCompressingIdx(i);
       try {
         let compressedResult: CompressResult;
         let qualityUsed: number;
@@ -368,6 +370,7 @@ export default function CompressScreen() {
         }
 
         updated[i] = { ...p, compressed: compressedResult };
+        setPhotos([...updated]);
 
         await addToHistory({
           id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
@@ -385,7 +388,7 @@ export default function CompressScreen() {
         console.error("Compression error for photo", i, e);
       }
     }
-    setPhotos(updated);
+    setCompressingIdx(null);
     setIsCompressing(false);
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
@@ -544,6 +547,12 @@ export default function CompressScreen() {
                       <Text style={styles.gridSavingsText}>-{savings}%</Text>
                     </View>
                   )}
+                  {isCompressing && compressingIdx === idx && !item.compressed && (
+                    <View style={styles.analyzingOverlay}>
+                      <Ionicons name="sparkles" size={14} color="#fff" />
+                      <Text style={styles.analyzingText}>Analiz ediliyor…</Text>
+                    </View>
+                  )}
                   {item.compressed?.winnerLabel && (
                     <View style={[styles.gridSavingsBadge, { bottom: "auto", top: 6, left: 6, right: "auto", backgroundColor: SMART_COLOR }]}>
                       <Text style={[styles.gridSavingsText, { fontSize: 9 }]}>
@@ -564,6 +573,14 @@ export default function CompressScreen() {
                       </Pressable>
                     )}
                   </View>
+                  {item.compressed?.winnerLabel && (
+                    <View style={styles.winnerLabelRow}>
+                      <Ionicons name="sparkles" size={9} color={SMART_COLOR} />
+                      <Text style={styles.winnerLabelText} numberOfLines={1}>
+                        {item.compressed.winnerLabel}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               );
             })}
@@ -589,7 +606,7 @@ export default function CompressScreen() {
                 {(["low", "medium", "high", "smart"] as Level[]).map((l) => {
                   const cfg = LEVEL_CONFIG[l];
                   const active = level === l;
-                  const locked = format === "png" && l !== "high" && l !== "smart";
+                  const locked = format === "png" && l !== "high";
                   return (
                     <Pressable
                       key={l}
@@ -972,6 +989,34 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: "Inter_700Bold",
     color: "#1A8C6A",
+  },
+  analyzingOverlay: {
+    position: "absolute",
+    inset: 0,
+    backgroundColor: "rgba(124,77,255,0.55)",
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  analyzingText: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    color: "#fff",
+    textAlign: "center",
+  },
+  winnerLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingBottom: 4,
+  },
+  winnerLabelText: {
+    fontSize: 9,
+    fontFamily: "Inter_500Medium",
+    color: SMART_COLOR,
+    flexShrink: 1,
   },
   gridSizeRow: {
     flexDirection: "row",

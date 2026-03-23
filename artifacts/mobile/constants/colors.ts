@@ -23,8 +23,6 @@ const clay = {
 export default {
   light: {
     text: clay.textPrimary,
-    textSecondary: clay.textSecondary,
-    textMuted: clay.textMuted,
     background: clay.cream,
     backgroundSecondary: clay.creamDark,
     tint: clay.coral,

@@ -101,8 +101,8 @@ export default function CompressScreen() {
           let fileSize = asset.fileSize ?? 0;
           if (!fileSize && asset.uri) {
             try {
-              const info = await FileSystem.getInfoAsync(asset.uri, { size: true });
-              if (info.exists && "size" in info) {
+              const info = await FileSystem.getInfoAsync(asset.uri);
+              if (info.exists && info.size !== undefined) {
                 fileSize = info.size;
               }
             } catch (_) {}
@@ -143,8 +143,8 @@ export default function CompressScreen() {
 
         let compressedSize = 0;
         try {
-          const info = await FileSystem.getInfoAsync(result.uri, { size: true });
-          if (info.exists && "size" in info) {
+          const info = await FileSystem.getInfoAsync(result.uri);
+          if (info.exists && info.size !== undefined) {
             compressedSize = info.size;
           }
         } catch (_) {}

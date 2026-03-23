@@ -1,4 +1,3 @@
-import Slider from "@react-native-community/slider";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system";
 import * as Haptics from "expo-haptics";
@@ -29,6 +28,9 @@ import { useCompression } from "@/context/CompressionContext";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
+type Level = "low" | "medium" | "high";
+type OutputFormat = "jpeg" | "png" | "webp";
+
 type SelectedPhoto = {
   uri: string;
   width: number;
@@ -40,12 +42,74 @@ type SelectedPhoto = {
 type CompressResult = {
   uri: string;
   fileSize: number;
+  format: OutputFormat;
 };
 
 type PhotoResult = {
   photo: SelectedPhoto;
   compressed: CompressResult | null;
   saved: boolean;
+};
+
+const LEVEL_CONFIG: Record<Level, { label: string; desc: string; color: string; bg: string }> = {
+  low: {
+    label: "Düşük",
+    desc: "~%40-55 küçültme",
+    color: Colors.light.coral,
+    bg: Colors.light.coral + "18",
+  },
+  medium: {
+    label: "Orta",
+    desc: "~%25-40 küçültme",
+    color: Colors.light.lavender,
+    bg: Colors.light.lavender + "22",
+  },
+  high: {
+    label: "Yüksek",
+    desc: "Kayıpsız kalite",
+    color: Colors.light.mint,
+    bg: Colors.light.mint + "28",
+  },
+};
+
+const FORMAT_CONFIG: Record<OutputFormat, { label: string; desc: string }> = {
+  jpeg: { label: "JPEG", desc: "Fotoğraf" },
+  png: { label: "PNG", desc: "Kayıpsız" },
+  webp: { label: "WEBP", desc: "Modern" },
+};
+
+function getCompressionSettings(level: Level, format: OutputFormat): {
+  saveFormat: ImageManipulator.SaveFormat;
+  compress: number;
+  actualFormat: OutputFormat;
+} {
+  if (level === "high") {
+    if (format === "png") {
+      return { saveFormat: ImageManipulator.SaveFormat.PNG, compress: 1.0, actualFormat: "png" };
+    }
+    return { saveFormat: ImageManipulator.SaveFormat.WEBP, compress: 1.0, actualFormat: "webp" };
+  }
+  if (level === "medium") {
+    return { saveFormat: ImageManipulator.SaveFormat.WEBP, compress: 0.80, actualFormat: "webp" };
+  }
+  const fmtMap: Record<OutputFormat, ImageManipulator.SaveFormat> = {
+    jpeg: ImageManipulator.SaveFormat.JPEG,
+    png: ImageManipulator.SaveFormat.PNG,
+    webp: ImageManipulator.SaveFormat.WEBP,
+  };
+  return { saveFormat: fmtMap[format], compress: 0.60, actualFormat: format };
+}
+
+const MIME_TYPES: Record<OutputFormat, string> = {
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+};
+
+const ESTIMATE_FACTORS: Record<Level, number> = {
+  low: 0.45,
+  medium: 0.60,
+  high: 0.75,
 };
 
 function formatBytes(bytes: number): string {
@@ -79,20 +143,13 @@ async function getFileSize(uri: string): Promise<number> {
   return 0;
 }
 
-function qualityLabel(q: number): string {
-  if (q < 0.65) return "Küçük";
-  if (q < 0.75) return "Düşük";
-  if (q < 0.82) return "Orta";
-  if (q < 0.9) return "Yüksek";
-  return "Çok Yüksek";
-}
-
 export default function CompressScreen() {
   const insets = useSafeAreaInsets();
   const { addToHistory } = useCompression();
 
   const [photos, setPhotos] = useState<PhotoResult[]>([]);
-  const [quality, setQuality] = useState(0.75);
+  const [level, setLevel] = useState<Level>("medium");
+  const [format, setFormat] = useState<OutputFormat>("jpeg");
   const [isCompressing, setIsCompressing] = useState(false);
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [allSaved, setAllSaved] = useState(false);
@@ -104,6 +161,22 @@ export default function CompressScreen() {
   };
   const animatePressOut = () => {
     Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30 }).start();
+  };
+
+  const handleFormatChange = (f: OutputFormat) => {
+    setFormat(f);
+    if (f === "png") {
+      setLevel("high");
+    }
+    Haptics.selectionAsync();
+  };
+
+  const handleLevelChange = (l: Level) => {
+    setLevel(l);
+    if (l !== "high" && format === "png") {
+      setFormat("jpeg");
+    }
+    Haptics.selectionAsync();
   };
 
   const pickImages = async () => {
@@ -145,19 +218,24 @@ export default function CompressScreen() {
     setIsCompressing(true);
     setAllSaved(false);
 
+    const { saveFormat, compress, actualFormat } = getCompressionSettings(level, format);
     const updated: PhotoResult[] = [...photos];
+
     for (let i = 0; i < photos.length; i++) {
       const p = photos[i];
       try {
         const result = await ImageManipulator.manipulateAsync(
           p.photo.uri,
           [],
-          { compress: quality, format: ImageManipulator.SaveFormat.JPEG }
+          { compress, format: saveFormat }
         );
 
         const compressedSize = await getFileSize(result.uri);
 
-        updated[i] = { ...p, compressed: { uri: result.uri, fileSize: compressedSize } };
+        updated[i] = {
+          ...p,
+          compressed: { uri: result.uri, fileSize: compressedSize, format: actualFormat },
+        };
 
         await addToHistory({
           id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
@@ -165,9 +243,11 @@ export default function CompressScreen() {
           compressedUri: result.uri,
           originalSize: p.photo.fileSize,
           compressedSize,
-          quality,
+          quality: compress,
           savedAt: Date.now(),
           fileName: p.photo.fileName,
+          format: actualFormat,
+          level,
         });
       } catch (e) {
         console.error("Compression error for photo", i, e);
@@ -221,12 +301,12 @@ export default function CompressScreen() {
     }
   };
 
-  const sharePhoto = async (uri: string) => {
+  const sharePhoto = async (uri: string, photoFormat: OutputFormat) => {
     await Haptics.selectionAsync();
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
       await Sharing.shareAsync(uri, {
-        mimeType: "image/jpeg",
+        mimeType: MIME_TYPES[photoFormat],
         dialogTitle: "Sıkıştırılmış fotoğrafı paylaş",
       });
     }
@@ -238,9 +318,12 @@ export default function CompressScreen() {
   const totalOriginal = photos.reduce((s, p) => s + p.photo.fileSize, 0);
   const totalCompressed = photos.reduce((s, p) => s + (p.compressed?.fileSize ?? 0), 0);
   const overallSavings = hasCompressed ? savingsPercent(totalOriginal, totalCompressed) : 0;
+  const estimatedSize = Math.round(totalOriginal * ESTIMATE_FACTORS[level]);
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomInset = Platform.OS === "web" ? 34 : 0;
+
+  const { actualFormat: willUseFormat } = getCompressionSettings(level, format);
 
   return (
     <View style={styles.container}>
@@ -320,7 +403,10 @@ export default function CompressScreen() {
                       {formatBytes(item.compressed?.fileSize ?? item.photo.fileSize)}
                     </Text>
                     {item.compressed && (
-                      <Pressable onPress={() => sharePhoto(item.compressed!.uri)} hitSlop={6}>
+                      <Pressable
+                        onPress={() => sharePhoto(item.compressed!.uri, item.compressed!.format)}
+                        hitSlop={6}
+                      >
                         <Ionicons name="share-outline" size={14} color={Colors.light.coral} />
                       </Pressable>
                     )}
@@ -333,41 +419,95 @@ export default function CompressScreen() {
 
         {photos.length > 0 && (
           <>
-            {/* Quality Slider Card */}
-            <ClayCard style={styles.qualityCard}>
-              <View style={styles.qualityHeader}>
-                <View style={styles.qualityTitleRow}>
-                  <Ionicons name="sparkles" size={18} color={Colors.light.lavender} />
-                  <Text style={styles.qualityTitle}>Kalite Seviyesi</Text>
-                </View>
-                <View style={[styles.qualityBadge, { backgroundColor: Colors.light.lavenderLight }]}>
-                  <Text style={[styles.qualityBadgeText, { color: "#7B4CCC" }]}>
-                    {qualityLabel(quality)} · %{Math.round(quality * 100)}
+            {/* Compression Settings Card */}
+            <ClayCard style={styles.settingsCard}>
+              {/* Level Selector */}
+              <View style={styles.sectionHeader}>
+                <Ionicons name="sparkles" size={16} color={Colors.light.lavender} />
+                <Text style={styles.sectionTitle}>Sıkıştırma Seviyesi</Text>
+              </View>
+              <View style={styles.pillRow}>
+                {(["low", "medium", "high"] as Level[]).map((l) => {
+                  const cfg = LEVEL_CONFIG[l];
+                  const active = level === l;
+                  return (
+                    <Pressable
+                      key={l}
+                      onPress={() => handleLevelChange(l)}
+                      style={[
+                        styles.levelPill,
+                        active
+                          ? { backgroundColor: cfg.color, borderColor: cfg.color }
+                          : { backgroundColor: cfg.bg, borderColor: cfg.color + "40" },
+                      ]}
+                    >
+                      <Text style={[
+                        styles.levelPillLabel,
+                        { color: active ? "#fff" : cfg.color },
+                      ]}>
+                        {cfg.label}
+                      </Text>
+                      <Text style={[
+                        styles.levelPillDesc,
+                        { color: active ? "rgba(255,255,255,0.85)" : cfg.color + "BB" },
+                      ]}>
+                        {cfg.desc}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Format Selector */}
+              <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+                <Ionicons name="document-outline" size={16} color={Colors.light.coral} />
+                <Text style={styles.sectionTitle}>Çıktı Formatı</Text>
+              </View>
+              <View style={styles.formatRow}>
+                {(["jpeg", "png", "webp"] as OutputFormat[]).map((f) => {
+                  const cfg = FORMAT_CONFIG[f];
+                  const active = format === f;
+                  const isPngLocked = f === "png" && format !== "png" && false;
+                  return (
+                    <Pressable
+                      key={f}
+                      onPress={() => handleFormatChange(f)}
+                      style={[
+                        styles.formatPill,
+                        active
+                          ? { backgroundColor: Colors.light.coral, borderColor: Colors.light.coral }
+                          : { backgroundColor: Colors.light.creamDark, borderColor: "transparent" },
+                        isPngLocked && { opacity: 0.5 },
+                      ]}
+                    >
+                      <Text style={[
+                        styles.formatPillLabel,
+                        { color: active ? "#fff" : Colors.light.textPrimary },
+                      ]}>
+                        {cfg.label}
+                      </Text>
+                      <Text style={[
+                        styles.formatPillDesc,
+                        { color: active ? "rgba(255,255,255,0.8)" : Colors.light.textMuted },
+                      ]}>
+                        {cfg.desc}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Note when medium overrides format */}
+              {level === "medium" && format !== "webp" && (
+                <View style={styles.infoRow}>
+                  <Ionicons name="information-circle-outline" size={14} color={Colors.light.textMuted} />
+                  <Text style={styles.infoText}>
+                    Orta seviyede WEBP kullanılır (en iyi denge)
                   </Text>
                 </View>
-              </View>
+              )}
 
-              <Slider
-                style={styles.slider}
-                minimumValue={0.6}
-                maximumValue={0.95}
-                step={0.01}
-                value={quality}
-                onValueChange={(val) => {
-                  setQuality(val);
-                }}
-                onSlidingComplete={() => Haptics.selectionAsync()}
-                minimumTrackTintColor={Colors.light.coral}
-                maximumTrackTintColor={Colors.light.creamDark}
-                thumbTintColor={Colors.light.coral}
-              />
-
-              <View style={styles.sliderLabels}>
-                <Text style={styles.sliderLabel}>Küçük · %60</Text>
-                <Text style={styles.sliderLabel}>Yüksek · %95</Text>
-              </View>
-
-              {/* Size summary */}
+              {/* Size Summary */}
               <View style={styles.estimateRow}>
                 <View style={styles.estimateItem}>
                   <Text style={styles.estimateLabel}>Toplam Orijinal</Text>
@@ -381,7 +521,7 @@ export default function CompressScreen() {
                   <Text style={[styles.estimateValue, { color: Colors.light.coral }]}>
                     {hasCompressed
                       ? formatBytes(totalCompressed)
-                      : `~${formatBytes(Math.round(totalOriginal * quality * 0.8))}`}
+                      : `~${formatBytes(estimatedSize)}`}
                   </Text>
                 </View>
                 {overallSavings > 0 && (
@@ -392,6 +532,16 @@ export default function CompressScreen() {
                   </View>
                 )}
               </View>
+
+              {/* Actual format info */}
+              {!hasCompressed && (
+                <View style={styles.outputInfo}>
+                  <Text style={styles.outputInfoText}>
+                    Çıktı: {willUseFormat.toUpperCase()} ·{" "}
+                    {level === "high" ? "Kayıpsız / maksimum kalite" : level === "medium" ? "WEBP ile akıllı sıkıştırma" : "Maksimum küçültme"}
+                  </Text>
+                </View>
+              )}
             </ClayCard>
 
             {/* Compress Button */}
@@ -464,7 +614,11 @@ export default function CompressScreen() {
                       { color: allSaved ? "#1A8C6A" : "#7B4CCC" },
                     ]}
                   >
-                    {allSaved ? "Galeriye Kaydedildi!" : "Tümünü Galeriye Kaydet"}
+                    {allSaved
+                      ? "Kaydedildi!"
+                      : Platform.OS === "web"
+                      ? "Tümünü İndir"
+                      : "Tümünü Galeriye Kaydet"}
                   </Text>
                 </Pressable>
               </ClayCard>
@@ -625,46 +779,75 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     color: Colors.light.textSecondary,
   },
-  qualityCard: {
-    gap: 12,
-  },
-  qualityHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  qualityTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
+  settingsCard: {
     gap: 8,
+    paddingBottom: 16,
   },
-  qualityTitle: {
-    fontSize: 16,
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 14,
     fontFamily: "Inter_600SemiBold",
     color: Colors.light.textPrimary,
   },
-  qualityBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  qualityBadgeText: {
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
-  slider: {
-    width: "100%",
-    height: 40,
-  },
-  sliderLabels: {
+  pillRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: -4,
+    gap: 8,
   },
-  sliderLabel: {
+  levelPill: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    gap: 2,
+  },
+  levelPillLabel: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+  },
+  levelPillDesc: {
+    fontSize: 10,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+  },
+  formatRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  formatPill: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    gap: 2,
+  },
+  formatPillLabel: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+  },
+  formatPillDesc: {
+    fontSize: 10,
+    fontFamily: "Inter_400Regular",
+  },
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 6,
+    paddingHorizontal: 2,
+  },
+  infoText: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",
     color: Colors.light.textMuted,
+    flex: 1,
   },
   estimateRow: {
     flexDirection: "row",
@@ -674,7 +857,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
     gap: 8,
-    marginTop: 4,
+    marginTop: 12,
   },
   estimateItem: {
     alignItems: "center",
@@ -699,6 +882,19 @@ const styles = StyleSheet.create({
   savingsText: {
     fontSize: 13,
     fontFamily: "Inter_700Bold",
+  },
+  outputInfo: {
+    backgroundColor: Colors.light.lavender + "18",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 6,
+  },
+  outputInfoText: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: "#7B4CCC",
+    textAlign: "center",
   },
   compressBtn: {
     flexDirection: "row",

@@ -16,6 +16,8 @@ export type CompressedPhoto = {
   quality: number;
   savedAt: number;
   fileName: string;
+  format?: string;
+  level?: string;
 };
 
 type CompressionContextType = {
